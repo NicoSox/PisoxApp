@@ -29,6 +29,10 @@ app.use(express.urlencoded({ extended: true }))
 app.use(`/${UPLOAD_DIR}`, express.static(path.resolve(UPLOAD_DIR)))
 
 // Rutas
+app.get('/', (_req, res) =>
+  res.json({ ok: true, service: 'Ticket Manager API' })
+)
+
 app.use('/api/tickets', ticketsRouter)
 app.use('/api/ocr',     ocrRouter)
 
