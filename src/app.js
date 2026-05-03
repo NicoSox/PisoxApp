@@ -38,5 +38,4 @@ app.get('/api/health', (_req, res) =>
 
 // Error handler siempre al final
 app.use(errorHandler)
-
 export default app
