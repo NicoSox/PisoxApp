@@ -13,7 +13,6 @@ import { errorHandler } from './middlewares/errorHandler.js'
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads'
-const PORT       = process.env.PORT || 8000
 const DEBUG      = process.env.DEBUG === 'true'
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
@@ -39,14 +38,5 @@ app.get('/api/health', (_req, res) =>
 
 // Error handler siempre al final
 app.use(errorHandler)
-
-app.listen(PORT, () => {
-  const API_URL = process.env.API_URL || `http://localhost:${PORT}`
-  console.log(`\n🎫  Ticket Manager API → ${API_URL}`)
-  console.log(`📂  Uploads            → ${API_URL}/${UPLOAD_DIR}`)
-  console.log(`🌐  CORS Origin        → ${FRONTEND_URL}`)
-  console.log(`🔑  Google Vision      → ${process.env.GOOGLE_APPLICATION_CREDENTIALS || '❌ FALTA configurar'}`)
-  console.log(`🗄️   MySQL              → ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}\n`)
-})
 
 export default app
