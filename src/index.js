@@ -18,6 +18,7 @@ process.on('unhandledRejection', (reason) => {
 
 async function connectDB() {
   try {
+    console.log('[connectDB] Intentando conectar a MySQL...')
     const conn = await pool.getConnection()
     await conn.ping()
     conn.release()
@@ -29,13 +30,18 @@ async function connectDB() {
 }
 
 export async function start() {
+  console.log('[start] Iniciando función start()')
   try {
+    console.log('[start] Llamando connectDB()...')
     await connectDB()
 
     const PORT = process.env.PORT || 8000
     const API_URL = process.env.API_URL || `http://localhost:${PORT}`
     const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads'
     const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
+
+    console.log('[start] Variables cargadas:', { PORT, API_URL, UPLOAD_DIR, FRONTEND_URL })
+    console.log('[start] Iniciando app.listen()...')
 
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`\n🎫  Ticket Manager API → ${API_URL}`)
@@ -45,9 +51,11 @@ export async function start() {
       console.log(`🗄️   MySQL              → ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}\n`)
     })
 
+    console.log('[start] Servidor escuchando correctamente')
     return server
   } catch (err) {
     console.error('❌ Failed to start application:', err.message)
+    console.error('❌ Stack:', err.stack)
     process.exit(1)
   }
 }
