@@ -60,5 +60,4 @@ export async function start() {
   }
 }
 
-// Solo exportar, sin top-level await
-export { start }
+// Sin top-level await, solo exportar
