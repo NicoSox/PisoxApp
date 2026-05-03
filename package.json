@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "dev":      "node --watch src/index.js",
-    "start":    "node src/index.js",
+    "dev":      "node --watch hostinger-start.cjs",
+    "start":    "node hostinger-start.cjs",
     "start:hostinger": "node hostinger-start.cjs",
     "db:init":  "node src/utils/initDb.js"
   },

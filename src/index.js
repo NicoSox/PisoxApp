@@ -52,5 +52,5 @@ export async function start() {
   }
 }
 
-// Ejecutar automáticamente al cargar este módulo
-start()
+// Solo exportar, sin top-level await
+export { start }
