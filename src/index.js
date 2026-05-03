@@ -52,7 +52,5 @@ export async function start() {
   }
 }
 
-// Ejecutar automáticamente si se invoca directamente
-if (process.argv[1] && process.argv[1].endsWith('src/index.js')) {
-  start()
-}
+// Ejecutar automáticamente al cargar este módulo
+start()
