@@ -83,17 +83,15 @@ function parseTicketText(text) {
   const codigoMatch = text.match(/Ticket\s+[\\"]?([a-f0-9]{6,12})[\\"]?/i)
   if (codigoMatch) result.codigo = codigoMatch[1]
 
-  // Título: último segmento entre comillas en la primera línea
+  // Título: último segmento tras el último | en la primera línea
   const firstLine = text.split('\n')[0]
-  const tituloMatches = firstLine.match(/[""\\"]([^"""\\]+)[""\\"](?:\s*[\|│]?\s*)?(?:\(|$|\n|Resumir)/g)
-  if (tituloMatches && tituloMatches.length > 0) {
-    const last = tituloMatches[tituloMatches.length - 1]
-    const m = last.match(/[""\\"]([^"""\\]+)[""\\"]/)
-    if (m) result.titulo = m[1].trim()
+  const tituloMatch = firstLine.match(/[|│]\s*[\\"""'"]([^\\"""'"]+)[\\"""'"]/)
+  if (tituloMatch) {
+    result.titulo = tituloMatch[1].trim()
   }
   // Fallback título: busca 'Tu ticket sobre "..."'
   if (!result.titulo) {
-    const sobreMatch = text.match(/Tu ticket sobre\s+[""\\"]([^"""\\]+)[""\\"]/)
+    const sobreMatch = text.match(/Tu ticket sobre\s+[\\"""'"]([^\\"""'"]+)[\\"""'"]/)
     if (sobreMatch) result.titulo = sobreMatch[1].trim()
   }
 
