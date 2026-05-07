@@ -77,80 +77,51 @@ async function runTesseract(imagePath) {
 
 // ── 4. Parser del formato específico del ticket ───────────────────────────────
 function parseTicketText(text) {
-  const parsed = {
-    codigo:      null,
-    titulo:      null,
-    sitio:       null,
-    rubro:       null,
-    sub_rubro:   null,
-    descripcion: null,
-    prioridad:   null,
+  const result = {}
+
+  // Código: busca Ticket "xxxx" o Ticket \"xxxx\"
+  const codigoMatch = text.match(/Ticket\s+[\\"]?([a-f0-9]{6,12})[\\"]?/i)
+  if (codigoMatch) result.codigo = codigoMatch[1]
+
+  // Título: último segmento entre comillas en la primera línea
+  const firstLine = text.split('\n')[0]
+  const tituloMatches = firstLine.match(/[""\\"]([^"""\\]+)[""\\"](?:\s*[\|│]?\s*)?(?:\(|$|\n|Resumir)/g)
+  if (tituloMatches && tituloMatches.length > 0) {
+    const last = tituloMatches[tituloMatches.length - 1]
+    const m = last.match(/[""\\"]([^"""\\]+)[""\\"]/)
+    if (m) result.titulo = m[1].trim()
+  }
+  // Fallback título: busca 'Tu ticket sobre "..."'
+  if (!result.titulo) {
+    const sobreMatch = text.match(/Tu ticket sobre\s+[""\\"]([^"""\\]+)[""\\"]/)
+    if (sobreMatch) result.titulo = sobreMatch[1].trim()
   }
 
-  if (!text) return parsed
+  // Sitio
+  const sitioMatch = text.match(/Sitio:\s*([^\n]+)/)
+  if (sitioMatch) result.sitio = sitioMatch[1].trim()
 
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  // Rubro
+  const rubroMatch = text.match(/Rubro:\s*([^\n]+)/)
+  if (rubroMatch) result.rubro = rubroMatch[1].trim()
 
-  // ── Código ──
-  // Busca: Ticket "8bd222a3" o Ticket 8bd222a3
-  const codigoMatch =
-    text.match(/[Tt]icket\s+[""]([a-zA-Z0-9_\-]{4,30})[""]/) ||
-    text.match(/[Tt]icket\s+([a-zA-Z0-9_\-]{4,30})\s/)
-  if (codigoMatch) parsed.codigo = codigoMatch[1]
+  // Sub-Rubro
+  const subMatch = text.match(/Sub-Rubro:\s*([^\n]+)/)
+  if (subMatch) result.sub_rubro = subMatch[1].trim()
 
-  // ── Título ──
-  // Busca: | "Titulo del ticket" o | Titulo del ticket (al final de la primera línea)
-  // También: sobre "Titulo"
-  const tituloMatch =
-    text.match(/[|｜]\s*[""](.+?)[""]/) ||
-    text.match(/sobre\s+[""](.+?)[""]/) ||
-    text.match(/éxito\s*[|｜]\s*[""]?(.{5,80})[""]?/)
-  if (tituloMatch) parsed.titulo = tituloMatch[1].trim().replace(/[""/]+$/, '').trim()
+  // Descripción — puede ser multilínea hasta "Prioridad:"
+  const descMatch = text.match(/Descripci[oó]n:\s*([\s\S]+?)(?=\nPrioridad:|\nActivar|\n\n)/)
+  if (descMatch) result.descripcion = descMatch[1].replace(/\n/g, ' ').trim()
 
-  // ── Campos clave: valor ──
-  // Soporta variaciones de OCR: "Rubro:", "Rubro :", "RUBRO:"
-  for (const line of lines) {
-    const tryField = (regex) => {
-      const m = line.match(regex)
-      return m ? m[1].trim() : null
-    }
-
-    if (!parsed.sitio)
-      parsed.sitio       = tryField(/^[Ss]itio\s*[:：]\s*(.+)/)
-
-    if (!parsed.rubro)
-      parsed.rubro       = tryField(/^[Rr]ubro\s*[:：]\s*(.+)/)
-
-    if (!parsed.sub_rubro)
-      parsed.sub_rubro   = tryField(/^[Ss]ub[\s\-]?[Rr]ubro\s*[:：]\s*(.+)/i)
-
-    if (!parsed.descripcion)
-      parsed.descripcion = tryField(/^[Dd]escripci[oó]n\s*[:：]\s*(.+)/)
-
-    if (!parsed.prioridad)
-      parsed.prioridad   = tryField(/^[Pp]rioridad\s*[:：]\s*(.+)/)
+  // Prioridad
+  const prioMatch = text.match(/Prioridad:\s*(Baja|Media|Alta|Crítica|Critica)/i)
+  if (prioMatch) {
+    result.prioridad = prioMatch[1].charAt(0).toUpperCase() + prioMatch[1].slice(1)
+    if (result.prioridad === 'Critica') result.prioridad = 'Crítica'
   }
 
-  // ── Normalizar prioridad ──
-  if (parsed.prioridad) {
-    const p = parsed.prioridad.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    if      (p.includes('baja'))   parsed.prioridad = 'Baja'
-    else if (p.includes('criti') || p.includes('críti')) parsed.prioridad = 'Crítica'
-    else if (p.includes('alta'))   parsed.prioridad = 'Alta'
-    else                           parsed.prioridad = 'Media'
-  }
-
-  // ── Fallback título ──
-  // Si no se encontró título, usar la primera línea que parezca un título real
-  if (!parsed.titulo) {
-    const skip = /[Tt]icket|¡Hola|cargado|exitosamente|[Ss]itio|[Rr]ubro|[Dd]escripci|[Pp]rioridad/
-    const fallback = lines.find(l => l.length > 8 && !l.match(skip))
-    if (fallback) parsed.titulo = fallback.slice(0, 120)
-  }
-
-  return parsed
+  return result
 }
-
 
 // ── FUNCIÓN PRINCIPAL ──────────────────────────────────────────────────────────
 export async function processTicketImage(originalPath) {
