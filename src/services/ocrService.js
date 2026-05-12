@@ -3,15 +3,6 @@
  * ─────────────
  * OCR optimizado para capturas de pantalla de sistema web.
  * Las capturas ya tienen texto nítido — no necesitan preprocesado agresivo.
- *
- * Formato del ticket:
- *   "Sitio" | Ticket "CODIGO" cargado con éxito | "Titulo"
- *   ─────────────────────────────────────────────────────
- *   Sitio:       Tucumán
- *   Rubro:       General y otros
- *   Sub-Rubro:   Edificio
- *   Descripción: Colocar media sombra estacionamiento
- *   Prioridad:   Baja
  */
 
 import fs   from 'fs/promises'
@@ -24,22 +15,25 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads'
 await fs.mkdir(UPLOAD_DIR, { recursive: true })
 
 
-// ── 1. Escalar imagen si es pequeña (capturas pequeñas dan peor OCR) ──────────
+// ── 1. Escalar imagen si es pequeña ──────────────────────────────────────────
 async function scaleIfNeeded(inputPath) {
-  const { width } = await sharp(inputPath).metadata()
-  // Si ya es grande, no tocar nada — el texto está perfecto
-  if (width >= 1000) return null
+  const { width, height } = await sharp(inputPath).metadata()
+  console.log(`[OCR] Imagen original: ${width}x${height}px`)
 
-  const outPath = path.join(UPLOAD_DIR, `scaled_${uuid()}.png`)
-  await sharp(inputPath)
-    .resize({ width: 1400, withoutEnlargement: false })
-    .png()                  // PNG sin compresión = mejor OCR
-    .toFile(outPath)
-  return outPath
+  // Si es muy angosta o pequeña, escalar — pero SIN recortar altura
+  if (width < 1000) {
+    const outPath = path.join(UPLOAD_DIR, `scaled_${uuid()}.png`)
+    await sharp(inputPath)
+      .resize({ width: 1400, withoutEnlargement: false })
+      .png()
+      .toFile(outPath)
+    return outPath
+  }
+  return null
 }
 
 
-// ── 2. Guardar imagen optimizada para cards (480×320 máx) ─────────────────────
+// ── 2. Guardar imagen optimizada para cards ───────────────────────────────────
 async function saveOptimized(inputPath, prefix = 'ticket') {
   const filename = `${prefix}_${uuid().slice(0, 8)}.jpg`
   const outPath  = path.join(UPLOAD_DIR, filename)
@@ -51,14 +45,13 @@ async function saveOptimized(inputPath, prefix = 'ticket') {
 }
 
 
-// ── 3. Tesseract.js — configurado para capturas de pantalla ───────────────────
+// ── 3. Tesseract — PSM 6, sin límite de página ────────────────────────────────
 async function runTesseract(imagePath) {
   const worker = await Tesseract.createWorker('spa', 1, {
     logger: () => {},
   })
 
   try {
-    // PSM 6 = bloque de texto uniforme — ideal para capturas web con texto estructurado
     await worker.setParameters({
       tessedit_pageseg_mode: '6',
       preserve_interword_spaces: '1',
@@ -75,77 +68,125 @@ async function runTesseract(imagePath) {
 }
 
 
-// ── 4. Parser del formato específico del ticket ───────────────────────────────
-function parseTicketText(text) {
+// ── 4. Normalizar texto — unifica variaciones de comillas y caracteres ─────────
+function normalizeText(text) {
+  return text
+    // Comillas tipográficas → estándar
+    .replace(/[""«»]/g, '"')
+    // Comillas escapadas → estándar
+    .replace(/\\"/g, '"')
+    // Comillas simples tipográficas → estándar
+    .replace(/['']/g, "'")
+    // Pipes alternativos → |
+    .replace(/[│┃❙]/g, '|')
+    // Guiones decorativos → espacio
+    .replace(/[—–─]+/g, ' ')
+    // Múltiples espacios → uno
+    .replace(/[ \t]{2,}/g, ' ')
+    // Limpiar líneas con solo ruido (solo símbolos no alfanuméricos)
+    .split('\n')
+    .filter(line => /[a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]/.test(line))
+    .join('\n')
+}
+
+
+// ── 5. Parser tolerante ────────────────────────────────────────────────────────
+function parseTicketText(rawText) {
+  const text   = normalizeText(rawText)
   const result = {}
 
-  // Código: busca Ticket "xxxx" o Ticket \"xxxx\"
-  const codigoMatch = text.match(/Ticket\s+[\\"]?([a-f0-9]{6,12})[\\"]?/i)
+  console.log('[OCR] Texto normalizado:\n', text)
+
+  // ── Código ──
+  // Busca: Ticket "xxxx" o Ticket 'xxxx' con 6-12 hex chars
+  const codigoMatch = text.match(/Ticket\s+"?'?([a-f0-9]{6,12})"?'?/i)
   if (codigoMatch) result.codigo = codigoMatch[1]
 
-  // Título: último segmento tras el último | en la primera línea
+  // ── Título ──
+  // Intento 1: última sección tras | en la primera línea
   const firstLine = text.split('\n')[0]
-  const tituloMatch = firstLine.match(/[|│]\s*[\\"""'"]([^\\"""'"]+)[\\"""'"]/)
-  if (tituloMatch) {
-    result.titulo = tituloMatch[1].trim()
+  const partes    = firstLine.split('|')
+  if (partes.length >= 3) {
+    // El título es la última parte, puede tener comillas o no
+    const ultimaParte = partes[partes.length - 1].trim()
+    const tituloClean = ultimaParte.replace(/^["'\s]+|["'\s]+$/g, '').trim()
+    if (tituloClean.length > 3) result.titulo = tituloClean
   }
-  // Fallback título: busca 'Tu ticket sobre "..."'
+
+  // Intento 2: "cargado con éxito | Título" — por si la primera línea tiene más texto
   if (!result.titulo) {
-    const sobreMatch = text.match(/Tu ticket sobre\s+[\\"""'"]([^\\"""'"]+)[\\"""'"]/)
+    const exitoMatch = text.match(/cargado con .xito\s*[|]\s*"?([^"\n]+)"?/i)
+    if (exitoMatch) result.titulo = exitoMatch[1].replace(/^["']+|["']+$/g, '').trim()
+  }
+
+  // Intento 3: fallback desde cuerpo del email
+  if (!result.titulo) {
+    const sobreMatch = text.match(/Tu ticket sobre\s+"([^"]+)"/i)
+      || text.match(/ticket sobre\s+"([^"]+)"/i)
+      || text.match(/Tu ticket sobre\s+(.+?)\s+se ha cargado/i)
     if (sobreMatch) result.titulo = sobreMatch[1].trim()
   }
 
-  // Sitio
-  const sitioMatch = text.match(/Sitio:\s*([^\n]+)/)
-  if (sitioMatch) result.sitio = sitioMatch[1].trim()
+  // ── Sitio ──
+  const sitioMatch = text.match(/Sitio\s*:\s*([^\n]+)/i)
+  if (sitioMatch) result.sitio = sitioMatch[1].replace(/^["'\s]+|["'\s]+$/g, '').trim()
 
-  // Rubro
-  const rubroMatch = text.match(/Rubro:\s*([^\n]+)/)
-  if (rubroMatch) result.rubro = rubroMatch[1].trim()
+  // ── Rubro ──
+  // Evitar capturar "Sub-Rubro" como "Rubro"
+  const rubroMatch = text.match(/(?<!Sub[-\s])Rubro\s*:\s*([^\n]+)/i)
+  if (rubroMatch) result.rubro = rubroMatch[1].replace(/^["'\s]+|["'\s]+$/g, '').trim()
 
-  // Sub-Rubro
-  const subMatch = text.match(/Sub-Rubro:\s*([^\n]+)/)
-  if (subMatch) result.sub_rubro = subMatch[1].trim()
+  // ── Sub-Rubro ──
+  const subMatch = text.match(/Sub[-\s]?Rubro\s*:\s*([^\n]+)/i)
+  if (subMatch) result.sub_rubro = subMatch[1].replace(/^["'\s]+|["'\s]+$/g, '').trim()
 
-  // Descripción — puede ser multilínea hasta "Prioridad:"
-  const descMatch = text.match(/Descripci[oó]n:\s*([\s\S]+?)(?=\nPrioridad:|\nActivar|\n\n)/)
-  if (descMatch) result.descripcion = descMatch[1].replace(/\n/g, ' ').trim()
-
-  // Prioridad
-  const prioMatch = text.match(/Prioridad:\s*(Baja|Media|Alta|Crítica|Critica)/i)
-  if (prioMatch) {
-    result.prioridad = prioMatch[1].charAt(0).toUpperCase() + prioMatch[1].slice(1)
-    if (result.prioridad === 'Critica') result.prioridad = 'Crítica'
+  // ── Descripción — multilínea hasta Prioridad, Activar Windows u otra sección ──
+  const descMatch = text.match(/Descripci[o6]n\s*:\s*([\s\S]+?)(?=\nPrioridad|\nActivar|\nAtenci|\nPronto|\nSaludos|\n\n|$)/i)
+  if (descMatch) {
+    result.descripcion = descMatch[1]
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0)
+      .join(' ')
+      .trim()
   }
 
+  // ── Prioridad ──
+  const prioMatch = text.match(/Prioridad\s*:\s*(Baja|Media|Alta|Cr[ií]tica)/i)
+  if (prioMatch) {
+    const p = prioMatch[1]
+    result.prioridad = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()
+    if (result.prioridad === 'Critica' || result.prioridad === 'Crítica') result.prioridad = 'Crítica'
+  }
+
+  console.log('[OCR] Campos extraídos:', result)
   return result
 }
+
 
 // ── FUNCIÓN PRINCIPAL ──────────────────────────────────────────────────────────
 export async function processTicketImage(originalPath) {
   const result = {
-    codigo:          null,
-    titulo:          null,
-    sitio:           null,
-    rubro:           null,
-    sub_rubro:       null,
-    descripcion:     null,
-    prioridad:       'Media',
-    ocr_confianza:   0,
-    texto_ocr_raw:   '',
-    imagen_path:     null,
+    codigo:           null,
+    titulo:           null,
+    sitio:            null,
+    rubro:            null,
+    sub_rubro:        null,
+    descripcion:      null,
+    prioridad:        'Media',
+    ocr_confianza:    0,
+    texto_ocr_raw:    '',
+    imagen_path:      null,
     campos_faltantes: [],
-    error:           null,
+    error:            null,
   }
 
   let scaled = null
 
   try {
-    // 1. Escalar solo si es necesario
     scaled = await scaleIfNeeded(originalPath)
     const ocrSource = scaled || originalPath
 
-    // 2. OCR sobre la imagen (original o escalada)
     try {
       const { text, confianza } = await runTesseract(ocrSource)
       result.texto_ocr_raw = text
@@ -154,7 +195,6 @@ export async function processTicketImage(originalPath) {
       console.log('[OCR] Texto extraído:\n', text)
       console.log('[OCR] Confianza:', confianza)
 
-      // 3. Parsear campos
       const parsed = parseTicketText(text)
       result.codigo      = parsed.codigo
       result.titulo      = parsed.titulo
@@ -169,10 +209,8 @@ export async function processTicketImage(originalPath) {
       result.error = `OCR falló: ${ocrErr.message}. Completá los campos manualmente.`
     }
 
-    // 4. Guardar imagen optimizada para la card
     result.imagen_path = await saveOptimized(originalPath, 'ticket')
 
-    // 5. Detectar campos obligatorios faltantes
     for (const [campo, label] of [
       ['codigo',      'Código'],
       ['titulo',      'Título'],
