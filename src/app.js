@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url'
 
 import ticketsRouter       from './routes/tickets.js'
 import ocrRouter           from './routes/ocr.js'
-import presupuestosRouter  from './routes/presupuestos.js'
+import presupuestosRouter  from './routes/presupuestosRouter.js'
 import { errorHandler }    from './middlewares/errorHandler.js'
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url))
