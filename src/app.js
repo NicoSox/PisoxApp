@@ -7,9 +7,10 @@ import path    from 'path'
 import fs      from 'fs'
 import { fileURLToPath } from 'url'
 
-import ticketsRouter    from './routes/tickets.js'
-import ocrRouter        from './routes/ocr.js'
-import { errorHandler } from './middlewares/errorHandler.js'
+import ticketsRouter       from './routes/tickets.js'
+import ocrRouter           from './routes/ocr.js'
+import presupuestosRouter  from './routes/presupuestos.js'
+import { errorHandler }    from './middlewares/errorHandler.js'
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads'
@@ -33,8 +34,9 @@ app.get('/', (_req, res) =>
   res.json({ ok: true, service: 'Ticket Manager API' })
 )
 
-app.use('/api/tickets', ticketsRouter)
-app.use('/api/ocr',     ocrRouter)
+app.use('/api/tickets',      ticketsRouter)
+app.use('/api/ocr',          ocrRouter)
+app.use('/api/presupuestos', presupuestosRouter)
 
 app.get('/api/health', (_req, res) =>
   res.json({ status: 'ok', ts: new Date().toISOString() })
