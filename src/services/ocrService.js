@@ -103,28 +103,26 @@ function parseTicketText(rawText) {
   if (codigoMatch) result.codigo = codigoMatch[1]
 
   // ── Título ──
-  // Intento 1: última sección tras | en la primera línea
-  const firstLine = text.split('\n')[0]
-  const partes    = firstLine.split('|')
-  if (partes.length >= 3) {
-    // El título es la última parte, puede tener comillas o no
-    const ultimaParte = partes[partes.length - 1].trim()
-    const tituloClean = ultimaParte.replace(/^["'\s]+|["'\s]+$/g, '').trim()
-    if (tituloClean.length > 3) result.titulo = tituloClean
+  // Priorizar formato del correo: Tu ticket sobre "..." se ha cargado
+  if (!result.titulo) {
+    const sobreMatch = text.match(/tu ticket sobre\s+"([^"]+)"\s+se ha cargad/i)
+      || text.match(/tu ticket sobre\s+'([^']+)'\s+se ha cargad/i)
+      || text.match(/tu ticket sobre\s+(.+?)\s+se ha cargad/i)
+    if (sobreMatch && sobreMatch[1]) {
+      const tituloClean = sobreMatch[1].replace(/^["'\s]+|["'\s]+$/g, '').trim()
+      if (tituloClean.length > 3) result.titulo = tituloClean
+    }
   }
 
-  // Intento 2: "cargado con éxito | Título" — por si la primera línea tiene más texto
+  // Fallback: título en el encabezado con pipes
   if (!result.titulo) {
-    const exitoMatch = text.match(/cargado con .xito\s*[|]\s*"?([^"\n]+)"?/i)
-    if (exitoMatch) result.titulo = exitoMatch[1].replace(/^["']+|["']+$/g, '').trim()
-  }
-
-  // Intento 3: fallback desde cuerpo del email
-  if (!result.titulo) {
-    const sobreMatch = text.match(/Tu ticket sobre\s+"([^"]+)"/i)
-      || text.match(/ticket sobre\s+"([^"]+)"/i)
-      || text.match(/Tu ticket sobre\s+(.+?)\s+se ha cargado/i)
-    if (sobreMatch) result.titulo = sobreMatch[1].trim()
+    const firstLine = text.split('\n')[0]
+    const partes    = firstLine.split('|')
+    if (partes.length >= 3) {
+      const ultimaParte = partes[partes.length - 1].trim()
+      const tituloClean = ultimaParte.replace(/^["'\s]+|["'\s]+$/g, '').trim()
+      if (tituloClean.length > 3) result.titulo = tituloClean
+    }
   }
 
   // ── Sitio ──
@@ -140,15 +138,23 @@ function parseTicketText(rawText) {
   const subMatch = text.match(/Sub[-\s]?Rubro\s*:\s*([^\n]+)/i)
   if (subMatch) result.sub_rubro = subMatch[1].replace(/^["'\s]+|["'\s]+$/g, '').trim()
 
-  // ── Descripción — multilínea hasta Prioridad, Activar Windows u otra sección ──
-  const descMatch = text.match(/Descripci[o6]n\s*:\s*([\s\S]+?)(?=\nPrioridad|\nActivar|\nAtenci|\nPronto|\nSaludos|\n\n|$)/i)
-  if (descMatch) {
+  // ── Descripción — tolerante a Descripcion/Descripción y separadores : o - ──
+  const descRegex = /Descripci(?:o|ó)n\s*[:\-]?\s*([\s\S]+?)(?=\n\s*(?:Prioridad|Activar|Atenci|Pronto|Saludos)\b|\n\s*\n|$)/i
+  const descMatch = text.match(descRegex)
+  if (descMatch && descMatch[1]) {
     result.descripcion = descMatch[1]
+      .replace(/\r/g, '')
       .split('\n')
       .map(l => l.trim())
       .filter(l => l.length > 0)
       .join(' ')
+      .replace(/\s{2,}/g, ' ')
       .trim()
+  } else {
+    const inlineDesc = text.match(/Descripci(?:o|ó)n\s*[:\-]?\s*([^\n]+)/i)
+    if (inlineDesc && inlineDesc[1]) {
+      result.descripcion = inlineDesc[1].trim()
+    }
   }
 
   // ── Prioridad ──
