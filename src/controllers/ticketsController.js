@@ -34,6 +34,12 @@ function buildWhereClause(query) {
   return { where, values }
 }
 
+function getActorName(req) {
+  if (req?.user?.nombre) return req.user.nombre
+  if (req?.user?.email) return req.user.email
+  return 'sistema'
+}
+
 async function logChange(ticketId, campo, valorAntes, valorDespues, modificadoPor = 'sistema') {
   await pool.execute(
     `INSERT INTO ticket_historial (ticket_id, campo, valor_antes, valor_despues, modificado_por)
@@ -141,7 +147,8 @@ export async function updateTicket(req, res) {
   if (sets.length) {
     values.push(id)
     await pool.execute(`UPDATE tickets SET ${sets.join(', ')} WHERE id = ?`, values)
-    await Promise.all(changes.map(c => logChange(id, c.campo, c.antes, c.despues)))
+    const actorName = getActorName(req)
+    await Promise.all(changes.map(c => logChange(id, c.campo, c.antes, c.despues, actorName)))
   }
 
   // ── Si el nuevo estado es "Resuelto" → borrar imagen del disco ──────────
@@ -150,7 +157,7 @@ export async function updateTicket(req, res) {
     await deleteImageFile(ticket.imagen_path)
     // Limpiar imagen_path en la DB también
     await pool.execute('UPDATE tickets SET imagen_path = NULL WHERE id = ?', [id])
-    await logChange(id, 'imagen_path', ticket.imagen_path, null, 'sistema (resuelto)')
+    await logChange(id, 'imagen_path', ticket.imagen_path, null, getActorName(req))
   }
 
   const [updated] = await pool.execute('SELECT * FROM tickets WHERE id = ?', [id])

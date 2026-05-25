@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { requireRole } from '../middlewares/auth.js'
 import {
   listTickets, createTicket, getTicket, updateTicket, deleteTicket,
   addComentario, deleteComentario,
@@ -15,7 +16,7 @@ router.get   ('/',    listTickets)
 router.post  ('/',    createTicket)
 router.get   ('/:id', getTicket)
 router.put   ('/:id', updateTicket)
-router.delete('/:id', deleteTicket)
+router.delete('/:id', requireRole('admin', 'superadmin'), deleteTicket)
 
 router.post  ('/:id/comentarios',      addComentario)
 router.delete('/:id/comentarios/:cid', deleteComentario)

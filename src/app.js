@@ -8,9 +8,13 @@ import fs      from 'fs'
 import { fileURLToPath } from 'url'
 
 import ticketsRouter       from './routes/tickets.js'
+import authRouter          from './routes/auth.js'
+import usersRouter         from './routes/users.js'
 import ocrRouter           from './routes/ocr.js'
 import presupuestosRouter  from './routes/presupuestosRouter.js'
 import { errorHandler }    from './middlewares/errorHandler.js'
+import { rejectLargeUploads, securityHeaders, simpleRateLimit } from './middlewares/security.js'
+import { requireAuth } from './middlewares/auth.js'
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads'
@@ -23,6 +27,8 @@ const app = express()
 
 app.use(cors({ origin: FRONTEND_URL }))
 if (DEBUG) app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
+app.use(securityHeaders)
+app.use(simpleRateLimit)
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
@@ -34,9 +40,11 @@ app.get('/', (_req, res) =>
   res.json({ ok: true, service: 'Ticket Manager API' })
 )
 
-app.use('/api/tickets',      ticketsRouter)
-app.use('/api/ocr',          ocrRouter)
-app.use('/api/presupuestos', presupuestosRouter)
+app.use('/api/auth',         authRouter)
+app.use('/api/users',        requireAuth, usersRouter)
+app.use('/api/tickets',      requireAuth, ticketsRouter)
+app.use('/api/ocr',          requireAuth, rejectLargeUploads, ocrRouter)
+app.use('/api/presupuestos', requireAuth, presupuestosRouter)
 
 app.get('/api/health', (_req, res) =>
   res.json({ status: 'ok', ts: new Date().toISOString() })
