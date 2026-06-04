@@ -12,6 +12,7 @@ const pool = mysql.createPool({
   queueLimit:         0,
   timezone:           '+00:00',
   charset:            'utf8mb4',
+  collation:          'utf8mb4_unicode_ci',
 })
 
 export default pool
