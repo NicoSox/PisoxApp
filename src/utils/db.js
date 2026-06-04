@@ -15,4 +15,12 @@ const pool = mysql.createPool({
   collation:          'utf8mb4_unicode_ci',
 })
 
+// Forzar collation en cada conexión nueva
+pool.on('connection', (connection) => {
+  connection.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")
+  connection.query("SET collation_connection = utf8mb4_unicode_ci")
+})
+
+export default pool
+
 export default pool
