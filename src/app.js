@@ -12,6 +12,7 @@ import authRouter          from './routes/auth.js'
 import usersRouter         from './routes/users.js'
 import ocrRouter           from './routes/ocr.js'
 import presupuestosRouter  from './routes/presupuestosRouter.js'
+import asistenciasRouter  from './routes/asistenciasRouter.js'
 import { errorHandler }    from './middlewares/errorHandler.js'
 import { rejectLargeUploads, securityHeaders, simpleRateLimit } from './middlewares/security.js'
 import { requireAuth } from './middlewares/auth.js'
@@ -45,6 +46,7 @@ app.use('/api/users',        requireAuth, usersRouter)
 app.use('/api/tickets',      requireAuth, ticketsRouter)
 app.use('/api/ocr',          requireAuth, rejectLargeUploads, ocrRouter)
 app.use('/api/presupuestos', requireAuth, presupuestosRouter)
+app.use('/api/asistencias',  requireAuth, asistenciasRouter)
 
 app.get('/api/health', (_req, res) =>
   res.json({ status: 'ok', ts: new Date().toISOString() })
