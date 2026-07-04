@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import pool from '../utils/db.js'
 
 const PASSWORD_REGEX = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/
-const ALLOWED_ROLES = ['tecnico', 'admin', 'user', 'superadmin']
+const ALLOWED_ROLES = ['tecnico', 'relevador', 'admin', 'user', 'superadmin']
 
 function normalizeText(value) {
   return String(value || '').trim()

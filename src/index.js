@@ -3,8 +3,8 @@ import path from 'path'
 import pool from './utils/db.js'
 import app from './app.js'
 
-// Cargar .env (ruta relativa al directorio del proyecto)
-dotenv.config({ path: path.resolve('..', '.env') })
+// Cargar .env desde la raíz del backend
+dotenv.config({ path: path.resolve(process.cwd(), '.env') })
 
 // Manejadores globales
 process.on('uncaughtException', (err) => {

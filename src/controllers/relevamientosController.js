@@ -1,0 +1,164 @@
+// src/controllers/relevamientosController.js
+import pool from '../utils/db.js'
+import { notificarAdmins } from '../services/pushService.js'
+
+const API_URL    = process.env.API_URL || ''
+const UPLOAD_DIR  = process.env.UPLOAD_DIR || 'uploads'
+
+// POST /api/relevamientos/upload-foto — sube una foto y devuelve su URL pública
+// (a diferencia del OCR, esta imagen se conserva: queda en uploads/ y servida por express.static)
+export async function uploadFotoRelevamiento(req, res) {
+  if (!req.file) return res.status(400).json({ error: 'No se recibió ninguna imagen' })
+  const url = `${API_URL}/${UPLOAD_DIR}/${req.file.filename}`
+  res.json({ url })
+}
+
+export async function listRelevamientos(req, res) {
+  const { visita_id, tecnico_id, estado } = req.query
+  let sql = `SELECT r.*, v.fecha_solicitada, v.franja,
+             u.nombre as tecnico_nombre,
+             tt.nombre as tipo_trabajo, st.nombre as subtipo_trabajo,
+             p.nombre as propiedad_nombre, p.direccion
+             FROM relevamientos r
+             JOIN visitas_tecnicas v ON v.id = r.visita_id
+             JOIN users u ON u.id = r.tecnico_id
+             LEFT JOIN tipos_trabajo tt ON tt.id = r.tipo_trabajo_id
+             LEFT JOIN subtipos_trabajo st ON st.id = r.subtipo_trabajo_id
+             JOIN propiedades p ON p.id = v.propiedad_id
+             WHERE 1=1`
+  const params = []
+
+  if (['tecnico', 'relevador'].includes(req.user.rol)) {
+    sql += ' AND r.tecnico_id = ?'; params.push(req.user.id)
+  }
+  if (visita_id) { sql += ' AND r.visita_id = ?';   params.push(visita_id) }
+  if (tecnico_id){ sql += ' AND r.tecnico_id = ?';  params.push(tecnico_id) }
+  if (estado)    { sql += ' AND r.estado = ?';       params.push(estado) }
+
+  sql += ' ORDER BY r.created_at DESC'
+  const [rows] = await pool.execute(sql, params)
+  res.json(rows)
+}
+
+export async function getRelevamiento(req, res) {
+  const [[row]] = await pool.execute(
+    `SELECT r.*, v.fecha_solicitada, v.franja, v.propiedad_id,
+            u.nombre as tecnico_nombre,
+            tt.nombre as tipo_trabajo, st.nombre as subtipo_trabajo,
+            st.garantia_meses,
+            p.nombre as propiedad_nombre, p.direccion,
+            cu.nombre as cliente_nombre
+     FROM relevamientos r
+     JOIN visitas_tecnicas v ON v.id = r.visita_id
+     JOIN users u ON u.id = r.tecnico_id
+     LEFT JOIN tipos_trabajo tt ON tt.id = r.tipo_trabajo_id
+     LEFT JOIN subtipos_trabajo st ON st.id = r.subtipo_trabajo_id
+     JOIN propiedades p ON p.id = v.propiedad_id
+     JOIN clientes c ON c.id = v.cliente_id
+     JOIN users cu ON cu.id = c.user_id
+     WHERE r.id = ?`,
+    [req.params.id]
+  )
+  if (!row) return res.status(404).json({ error: 'No encontrado' })
+  row.fotos_drive = row.fotos_drive ? JSON.parse(row.fotos_drive) : []
+  res.json(row)
+}
+
+export async function createRelevamiento(req, res) {
+  const {
+    visita_id, tipo_trabajo_id, subtipo_trabajo_id,
+    descripcion, herramientas, horas_estimadas,
+    materiales_notas, fotos_drive, notas_adicionales,
+  } = req.body
+
+  if (!visita_id || !descripcion) {
+    return res.status(400).json({ error: 'visita_id y descripcion son requeridos' })
+  }
+
+  const [r] = await pool.execute(
+    `INSERT INTO relevamientos
+     (visita_id, tecnico_id, tipo_trabajo_id, subtipo_trabajo_id,
+      descripcion, herramientas, horas_estimadas,
+      materiales_notas, fotos_drive, notas_adicionales)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      visita_id, req.user.id,
+      tipo_trabajo_id || null, subtipo_trabajo_id || null,
+      descripcion,
+      herramientas || null,
+      horas_estimadas || 1,
+      materiales_notas || null,
+      fotos_drive ? JSON.stringify(fotos_drive) : null,
+      notas_adicionales || null,
+    ]
+  )
+
+  // Notificar a admins que hay un relevamiento nuevo
+  await notificarAdmins(
+    'Nuevo relevamiento cargado',
+    `El técnico ${req.user.nombre} cargó un relevamiento. Revisalo para presupuestar.`,
+    'visita',
+    visita_id
+  )
+
+  res.status(201).json({ id: r.insertId, ok: true })
+}
+
+export async function updateRelevamiento(req, res) {
+  const {
+    tipo_trabajo_id, subtipo_trabajo_id,
+    descripcion, herramientas, horas_estimadas,
+    materiales_notas, fotos_drive, notas_adicionales, estado,
+  } = req.body
+
+  const [[rel]] = await pool.execute(
+    `SELECT * FROM relevamientos WHERE id = ?`, [req.params.id]
+  )
+  if (!rel) return res.status(404).json({ error: 'No encontrado' })
+
+  // Solo el técnico/relevador que lo creó o admin/superadmin puede editar
+  if (['tecnico', 'relevador'].includes(req.user.rol) && rel.tecnico_id !== req.user.id) {
+    return res.status(403).json({ error: 'Sin permisos' })
+  }
+
+  await pool.execute(
+    `UPDATE relevamientos SET
+     tipo_trabajo_id=?, subtipo_trabajo_id=?,
+     descripcion=?, herramientas=?, horas_estimadas=?,
+     materiales_notas=?, fotos_drive=?, notas_adicionales=?, estado=?
+     WHERE id=?`,
+    [
+      tipo_trabajo_id || rel.tipo_trabajo_id,
+      subtipo_trabajo_id || rel.subtipo_trabajo_id,
+      descripcion || rel.descripcion,
+      herramientas || rel.herramientas,
+      horas_estimadas || rel.horas_estimadas,
+      materiales_notas || rel.materiales_notas,
+      fotos_drive ? JSON.stringify(fotos_drive) : rel.fotos_drive,
+      notas_adicionales || rel.notas_adicionales,
+      estado || rel.estado,
+    ]
+  )
+
+  // Si se marca como enviado, notificar admins y cerrar la visita asociada
+  // (esto es lo que destraba el siguiente turno en la cola del relevador)
+  if (estado === 'enviado' && rel.estado !== 'enviado') {
+    await pool.execute(
+      `UPDATE visitas_tecnicas SET estado='realizada' WHERE id=?`,
+      [rel.visita_id]
+    )
+    await notificarAdmins(
+      'Relevamiento enviado',
+      `El técnico ${req.user.nombre} marcó el relevamiento como enviado. Listo para presupuestar.`,
+      'visita',
+      rel.visita_id
+    )
+  }
+
+  res.json({ ok: true })
+}
+
+export async function deleteRelevamiento(req, res) {
+  await pool.execute(`DELETE FROM relevamientos WHERE id = ?`, [req.params.id])
+  res.json({ ok: true })
+}
