@@ -59,6 +59,12 @@ export async function createUser(req, res) {
   if (!email) return res.status(400).json({ error: 'El email es obligatorio' })
   if (!normalizeRole(rol)) return res.status(400).json({ error: 'Rol inválido' })
 
+  // Un admin (no superadmin) solo puede agregar técnicos o relevadores al equipo —
+  // no puede crear otros admins, superadmins, ni cuentas de cliente.
+  if (req.user.rol === 'admin' && !['tecnico', 'relevador'].includes(rol)) {
+    return res.status(403).json({ error: 'Como admin solo podés agregar técnicos o relevadores' })
+  }
+
   const passwordError = validatePassword(password)
   if (passwordError) return res.status(400).json({ error: passwordError })
 

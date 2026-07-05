@@ -81,3 +81,13 @@ export async function getScheduleMes(req, res) {
 
   res.json(diasML)
 }
+
+// ── El técnico consulta si alguna vez fue asignado a la rotación de ML ──────
+// Determina si la card de Mercado Libre debe mostrarse en su home.
+export async function getMiEstadoML(req, res) {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) as total FROM schedule_mercadolibre WHERE tecnico_id = ?`,
+    [req.user.id]
+  )
+  res.json({ asignado: rows[0].total > 0 })
+}

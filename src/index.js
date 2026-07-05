@@ -1,10 +1,14 @@
 import dotenv from 'dotenv'
 import path from 'path'
-import pool from './utils/db.js'
-import app from './app.js'
 
-// Cargar .env desde la raíz del backend
-dotenv.config({ path: path.resolve(process.cwd(), '.env') })
+// Carga .env.production en producción, .env en desarrollo.
+// IMPORTANTE: pool (db.js) y app.js se importan de forma DINÁMICA más abajo,
+// después de dotenv.config(). Si fueran imports estáticos de ES modules,
+// se resuelven ANTES que cualquier código de este archivo (incluido este
+// dotenv.config), y terminarían leyendo variables de entorno vacías.
+const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
+dotenv.config({ path: path.resolve(process.cwd(), envFile) })
+console.log(`[env] Cargando variables desde ${envFile}`)
 
 // Manejadores globales
 process.on('uncaughtException', (err) => {
@@ -16,7 +20,7 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1)
 })
 
-async function connectDB() {
+async function connectDB(pool) {
   try {
     console.log('[connectDB] Intentando conectar a MySQL...')
     const conn = await pool.getConnection()
@@ -32,8 +36,12 @@ async function connectDB() {
 export async function start() {
   console.log('[start] Iniciando función start()')
   try {
+    // Import dinámico: se ejecuta acá, después de que dotenv.config() ya corrió
+    const { default: pool } = await import('./utils/db.js')
+    const { default: app }  = await import('./app.js')
+
     console.log('[start] Llamando connectDB()...')
-    await connectDB()
+    await connectDB(pool)
 
     const PORT = process.env.PORT || 8000
     const API_URL = process.env.API_URL || `http://localhost:${PORT}`

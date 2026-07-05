@@ -93,7 +93,7 @@ export async function getDisponibilidad(req, res) {
  * Asigna automáticamente el mejor técnico disponible
  * para una zona, fecha y franja dadas
  */
-async function asignarTecnico(zonaId, fecha, franja, horasNecesarias = 1) {
+export async function asignarTecnico(zonaId, fecha, franja, horasNecesarias = 1) {
   const jornadaHoras = 8
 
   // Técnicos de la zona
@@ -182,7 +182,7 @@ export async function getMisVisitas(req, res) {
 export async function getVisita(req, res) {
   const [[visita]] = await pool.execute(
     `SELECT v.*, p.nombre as propiedad_nombre, p.direccion, p.zona_id,
-            u.nombre as cliente_nombre, t.nombre as tecnico_nombre,
+            u.nombre as cliente_nombre, c.user_id as cliente_user_id, t.nombre as tecnico_nombre,
             z.nombre as zona_nombre
      FROM visitas_tecnicas v
      JOIN propiedades p ON p.id = v.propiedad_id
@@ -194,6 +194,9 @@ export async function getVisita(req, res) {
     [req.params.id]
   )
   if (!visita) return res.status(404).json({ error: 'Visita no encontrada' })
+  if (req.user.rol === 'user' && visita.cliente_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Sin permisos' })
+  }
   res.json(visita)
 }
 

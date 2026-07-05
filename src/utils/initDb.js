@@ -136,8 +136,8 @@ CREATE TABLE IF NOT EXISTS solicitudes_ausencia (
 
 -- ── 1. Push tokens (se agrega columna a users existente) ────────────────────
 ALTER TABLE users
-  ADD COLUMN expo_push_token VARCHAR(255) DEFAULT NULL,
-  ADD COLUMN push_activo TINYINT(1) NOT NULL DEFAULT 1;
+  ADD COLUMN IF NOT EXISTS expo_push_token VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS push_activo TINYINT(1) NOT NULL DEFAULT 1;
 
 -- ── 2. Zonas de cobertura ────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS zonas (
@@ -305,7 +305,9 @@ CREATE TABLE IF NOT EXISTS trabajos_cliente (
   fecha_fin             DATE         DEFAULT NULL,
   garantia_meses        INT UNSIGNED DEFAULT 0,
   garantia_hasta        DATE         DEFAULT NULL,  -- calculado: fecha_fin + garantia_meses
-  estado                ENUM('presupuestado','aprobado','agendado','en_curso','completado','cancelado')
+  respuesta_cliente     TEXT         DEFAULT NULL,  -- motivo opcional si el cliente rechaza el presupuesto
+  motivo_reprogramacion TEXT         DEFAULT NULL,  -- motivo cuando técnico/admin pide reprogramar
+  estado                ENUM('presupuestado','aprobado','agendado','en_curso','completado','cancelado','reprogramar')
                         NOT NULL DEFAULT 'presupuestado',
   created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -317,6 +319,14 @@ CREATE TABLE IF NOT EXISTS trabajos_cliente (
   CONSTRAINT fk_tc_visita     FOREIGN KEY (visita_id)          REFERENCES visitas_tecnicas(id) ON DELETE SET NULL,
   CONSTRAINT fk_tc_relev      FOREIGN KEY (relevamiento_id)    REFERENCES relevamientos(id)    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Por si trabajos_cliente ya existía sin estas columnas/estado
+ALTER TABLE trabajos_cliente
+  ADD COLUMN IF NOT EXISTS respuesta_cliente TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS motivo_reprogramacion TEXT DEFAULT NULL;
+ALTER TABLE trabajos_cliente
+  MODIFY estado ENUM('presupuestado','aprobado','agendado','en_curso','completado','cancelado','reprogramar')
+  NOT NULL DEFAULT 'presupuestado';
 
 -- ── 13. Turnos agendados (trabajo confirmado con fecha y técnico) ─────────────
 CREATE TABLE IF NOT EXISTS turnos_agendados (
@@ -467,13 +477,31 @@ CREATE TABLE IF NOT EXISTS localidades (
 
 -- ── 3. Agregar localidad_id a zonas ──────────────────────────────────────────
 ALTER TABLE zonas
-  ADD COLUMN IF NOT EXISTS localidad_id INT UNSIGNED DEFAULT NULL,
-  ADD CONSTRAINT fk_zona_localidad FOREIGN KEY (localidad_id) REFERENCES localidades(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS localidad_id INT UNSIGNED DEFAULT NULL;
+
+-- MySQL no soporta "ADD CONSTRAINT IF NOT EXISTS", así que lo chequeamos
+-- a mano contra information_schema antes de intentar agregarla.
+SET @c1 = (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+           WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'fk_zona_localidad');
+SET @sql1 = IF(@c1 = 0,
+  'ALTER TABLE zonas ADD CONSTRAINT fk_zona_localidad FOREIGN KEY (localidad_id) REFERENCES localidades(id) ON DELETE SET NULL',
+  'SELECT 1');
+PREPARE stmt1 FROM @sql1;
+EXECUTE stmt1;
+DEALLOCATE PREPARE stmt1;
 
 -- ── 4. Agregar provincia_id a propiedades ────────────────────────────────────
 ALTER TABLE propiedades
-  ADD COLUMN IF NOT EXISTS localidad_id INT UNSIGNED DEFAULT NULL,
-  ADD CONSTRAINT fk_prop_localidad FOREIGN KEY (localidad_id) REFERENCES localidades(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS localidad_id INT UNSIGNED DEFAULT NULL;
+
+SET @c2 = (SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+           WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'fk_prop_localidad');
+SET @sql2 = IF(@c2 = 0,
+  'ALTER TABLE propiedades ADD CONSTRAINT fk_prop_localidad FOREIGN KEY (localidad_id) REFERENCES localidades(id) ON DELETE SET NULL',
+  'SELECT 1');
+PREPARE stmt2 FROM @sql2;
+EXECUTE stmt2;
+DEALLOCATE PREPARE stmt2;
 
 -- ── 5. Datos iniciales — Tucumán ─────────────────────────────────────────────
 INSERT INTO provincias (nombre, codigo) VALUES
@@ -489,7 +517,7 @@ ON DUPLICATE KEY UPDATE codigo = VALUES(codigo);
 
 -- Localidades de Tucumán
 INSERT INTO localidades (provincia_id, nombre)
-SELECT id, nombre FROM provincias p,
+SELECT p.id, loc.nombre FROM provincias p,
 (SELECT 'San Miguel de Tucumán' AS nombre UNION ALL
  SELECT 'Yerba Buena'           UNION ALL
  SELECT 'Tafí Viejo'            UNION ALL

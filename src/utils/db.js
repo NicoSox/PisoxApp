@@ -1,12 +1,17 @@
 import mysql from 'mysql2/promise'
-import 'dotenv/config'
+
+const required = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']
+const missing = required.filter(k => !process.env[k])
+if (missing.length) {
+  throw new Error(`Faltan variables de entorno de base de datos: ${missing.join(', ')}`)
+}
 
 const pool = mysql.createPool({
-  host:               process.env.DB_HOST     || 'localhost',
+  host:               process.env.DB_HOST,
   port:               parseInt(process.env.DB_PORT || '3306', 10),
-  user:               process.env.DB_USER     || 'root',
-  password:           process.env.DB_PASSWORD || '@N1c0S0x1827',
-  database:           process.env.DB_NAME     || 'pisox_app',
+  user:               process.env.DB_USER,
+  password:           process.env.DB_PASSWORD,
+  database:           process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit:    10,
   queueLimit:         0,

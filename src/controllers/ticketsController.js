@@ -129,6 +129,13 @@ export async function updateTicket(req, res) {
   if (!current.length) return res.status(404).json({ error: 'Ticket no encontrado' })
 
   const ticket = current[0]
+
+  // Admin/superadmin pueden ver y crear tickets, pero no cambiar su estado
+  // (Pendiente/En Proceso/Resuelto/Cerrado) — eso queda a cargo del técnico.
+  if (['admin', 'superadmin'].includes(req.user.rol) && req.body.estado !== undefined && req.body.estado !== ticket.estado) {
+    return res.status(403).json({ error: 'Como admin/superadmin podés ver los tickets, pero no cambiar su estado.' })
+  }
+
   const campos = ['titulo', 'sitio', 'rubro', 'sub_rubro', 'descripcion',
                   'prioridad', 'estado', 'asignado_a', 'notas']
 
