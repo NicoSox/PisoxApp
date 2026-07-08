@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS solicitudes_ausencia (
 -- ── 1. Push tokens (se agrega columna a users existente) ────────────────────
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS expo_push_token VARCHAR(255) DEFAULT NULL,
-  ADD COLUMN IF NOT EXISTS push_activo TINYINT(1) NOT NULL DEFAULT 1;
+  ADD COLUMN IF NOT EXISTS push_activo TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS ml_habilitado TINYINT(1) NOT NULL DEFAULT 0;
 
 -- ── 2. Zonas de cobertura ────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS zonas (

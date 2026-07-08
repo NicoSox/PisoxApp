@@ -27,6 +27,9 @@ export async function crearSchedule(req, res) {
      ON DUPLICATE KEY UPDATE es_bucle = VALUES(es_bucle), activo = 1`,
     [tecnico_id, semana_del_mes, dia_semana, es_bucle ? 1 : 1]
   )
+  // Apenas se le asigna el primer día, queda habilitado para ver la card de
+  // ML y marcar presentismo — sin esto, no ve nada de Mercado Libre.
+  await pool.execute(`UPDATE users SET ml_habilitado = 1 WHERE id = ?`, [tecnico_id])
   res.status(201).json({ id: r.insertId || null, ok: true })
 }
 
@@ -82,12 +85,24 @@ export async function getScheduleMes(req, res) {
   res.json(diasML)
 }
 
-// ── El técnico consulta si alguna vez fue asignado a la rotación de ML ──────
+// ── El técnico consulta si está habilitado para Mercado Libre ──────────────
 // Determina si la card de Mercado Libre debe mostrarse en su home.
 export async function getMiEstadoML(req, res) {
-  const [rows] = await pool.execute(
-    `SELECT COUNT(*) as total FROM schedule_mercadolibre WHERE tecnico_id = ?`,
+  const [[row]] = await pool.execute(
+    `SELECT ml_habilitado FROM users WHERE id = ?`,
     [req.user.id]
   )
-  res.json({ asignado: rows[0].total > 0 })
+  res.json({ asignado: !!row?.ml_habilitado })
+}
+
+// PATCH /api/schedule-ml/habilitar/:tecnicoId  { habilitado: bool }
+// Admin/superadmin habilita o revoca manualmente el acceso a ML de un
+// técnico, sin necesidad de borrar sus asignaciones de días.
+export async function setHabilitadoML(req, res) {
+  const { habilitado } = req.body
+  await pool.execute(
+    `UPDATE users SET ml_habilitado = ? WHERE id = ?`,
+    [habilitado ? 1 : 0, req.params.tecnicoId]
+  )
+  res.json({ ok: true })
 }

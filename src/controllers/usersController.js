@@ -32,6 +32,7 @@ function mapUser(row) {
     email: row.email,
     rol: row.rol,
     activo: row.activo,
+    ml_habilitado: !!row.ml_habilitado,
     created_at: row.created_at,
     updated_at: row.updated_at,
     last_login_at: row.last_login_at,
@@ -40,7 +41,7 @@ function mapUser(row) {
 
 export async function listUsers(req, res) {
   const [rows] = await pool.execute(
-    `SELECT id, nombre, email, rol, activo, created_at, updated_at, last_login_at
+    `SELECT id, nombre, email, rol, activo, ml_habilitado, created_at, updated_at, last_login_at
      FROM users
      ORDER BY created_at DESC`
   )
