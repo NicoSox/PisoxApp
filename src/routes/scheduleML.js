@@ -5,9 +5,10 @@ import { listarSchedule, crearSchedule, eliminarSchedule, getScheduleMes, getMiE
 
 const r = Router()
 const admin = requireRole('admin','superadmin')
+const staff = requireRole('admin','superadmin','tecnico','relevador')
 
 r.get   ('/',                  requireAuth, admin, listarSchedule)
-r.get   ('/mes',               requireAuth, admin, getScheduleMes)
+r.get   ('/mes',               requireAuth, staff, getScheduleMes)
 r.get   ('/mi-estado',         requireAuth, getMiEstadoML)
 r.post  ('/',                  requireAuth, admin, crearSchedule)
 r.delete('/:id',                requireAuth, admin, eliminarSchedule)
