@@ -101,14 +101,14 @@ export async function toggleAsistencia(req, res) {
     const nuevoEstado = existing[0].presente ? 0 : 1
     await pool.execute(
       'UPDATE asistencias SET presente = ?, creado_por = ? WHERE id = ?',
-      [nuevoEstado, user.nombre, existing[0].id]
+      [nuevoEstado, user.id, existing[0].id]
     )
     return res.json({ fecha, presente: !!nuevoEstado, accion: 'actualizado' })
   } else {
     // Crear nuevo
     await pool.execute(
       'INSERT INTO asistencias (user_id, fecha, presente, creado_por) VALUES (?, ?, 1, ?)',
-      [targetUserId, fecha, user.nombre]
+      [targetUserId, fecha, user.id]
     )
     return res.json({ fecha, presente: true, accion: 'creado' })
   }
@@ -131,7 +131,7 @@ export async function updateAsistencia(req, res) {
 
   await pool.execute(
     'UPDATE asistencias SET presente = ?, creado_por = ? WHERE id = ?',
-    [presente ? 1 : 0, user.nombre, id]
+    [presente ? 1 : 0, user.id, id]
   )
 
   res.json({ ok: true })
