@@ -30,7 +30,7 @@ export async function getAsistencias(req, res) {
   }
 
   const [rows] = await pool.execute(
-    `SELECT id, user_id, fecha, presente, nota, creado_por, updated_at
+    `SELECT id, user_id, DATE_FORMAT(fecha, '%Y-%m-%d') AS fecha, presente, nota, creado_por, updated_at
      FROM asistencias
      WHERE ${where}
      ORDER BY fecha ASC`,
