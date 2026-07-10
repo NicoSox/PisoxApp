@@ -6,30 +6,42 @@ import pool from '../utils/db.js'
 export async function getAsistencias(req, res) {
   const { user } = req
   const mes      = req.query.mes  // formato YYYY-MM
-  let   userId   = req.query.user_id ? Number(req.query.user_id) : user.id
+  const esStaff  = ['admin', 'superadmin'].includes(user.rol)
 
-  // Restricción de rol
-  if (user.rol === 'tecnico' || user.rol === 'user') {
+  // Técnico/relevador/user solo pueden ver las suyas. Admin/superadmin pueden
+  // pedir las de un técnico puntual (user_id) o, si no mandan user_id, las de
+  // TODO el equipo (necesario para pintar el calendario de todos los técnicos).
+  let userId = null
+  if (!esStaff) {
     userId = user.id
+  } else if (req.query.user_id) {
+    userId = Number(req.query.user_id)
   }
 
   if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
     return res.status(400).json({ error: 'Parámetro mes requerido (YYYY-MM)' })
   }
 
+  const params = [mes]
+  let   where  = `DATE_FORMAT(fecha, '%Y-%m') = ?`
+  if (userId) {
+    where += ' AND user_id = ?'
+    params.push(userId)
+  }
+
   const [rows] = await pool.execute(
     `SELECT id, user_id, fecha, presente, nota, creado_por, updated_at
      FROM asistencias
-     WHERE user_id = ?
-       AND DATE_FORMAT(fecha, '%Y-%m') = ?
+     WHERE ${where}
      ORDER BY fecha ASC`,
-    [userId, mes]
+    params
   )
 
-  // Contar días presentes hasta hoy dentro del mes
+  // Contar días presentes hasta hoy dentro del mes (solo aplica a consulta de
+  // un único usuario; si el admin pidió todo el equipo, se devuelve en 0)
   const hoy       = new Date().toISOString().slice(0, 10)
-  const diasHoy   = rows.filter(r => r.presente && r.fecha <= hoy).length
-  const diasTotal = rows.filter(r => r.presente).length
+  const diasHoy   = userId ? rows.filter(r => r.presente && r.fecha <= hoy).length : 0
+  const diasTotal = userId ? rows.filter(r => r.presente).length : 0
 
   res.json({ asistencias: rows, dias_hasta_hoy: diasHoy, dias_total: diasTotal })
 }
