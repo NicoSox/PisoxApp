@@ -39,6 +39,22 @@ export async function eliminarSchedule(req, res) {
   res.json({ ok: true })
 }
 
+// ── Numeración continua de semanas (real, lunes-viernes) ───────────────────
+// Antes se usaba Math.ceil(dia/7), que corta el mes en bloques fijos de 7
+// días — eso rompe las semanas reales que empiezan a fin de un mes y
+// terminan a principio del siguiente (ej. lunes 29 a viernes 3). Acá se
+// numera la semana de forma continua desde un ancla fija (lunes 1/1/2024),
+// así una semana real nunca queda partida ni cambia de número según el mes.
+const ANCLA_LUNES_MS = Date.UTC(2024, 0, 1) // 1/1/2024 es lunes
+const CICLO_SEMANAS  = 4
+
+function getSemanaCiclo(anio, mesIdx0, dia) {
+  const d = Date.UTC(anio, mesIdx0, dia)
+  const diffDias  = Math.floor((d - ANCLA_LUNES_MS) / 86400000)
+  const semanaAbs = Math.floor(diffDias / 7)
+  return ((semanaAbs % CICLO_SEMANAS) + CICLO_SEMANAS) % CICLO_SEMANAS + 1
+}
+
 // GET /api/schedule-ml/mes?año=2026&mes=6
 // Devuelve qué técnico va a ML cada día del mes
 export async function getScheduleMes(req, res) {
@@ -63,8 +79,8 @@ export async function getScheduleMes(req, res) {
     const diaSem = fecha.getDay() // 0=dom, 1=lun... 6=sab
     if (diaSem === 0 || diaSem === 6) continue // skip fines de semana
 
-    // Calcular semana del mes (1-4)
-    const semanaMes = Math.ceil(dia / 7)
+    // Calcular semana del ciclo (continua, no reinicia con el mes)
+    const semanaMes = getSemanaCiclo(anio, mes - 1, dia)
 
     const matches = schedules.filter(s =>
       s.semana_del_mes === semanaMes &&
