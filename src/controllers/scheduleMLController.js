@@ -6,26 +6,51 @@ import pool from '../utils/db.js'
 export async function listarSchedule(req, res) {
   const [rows] = await pool.execute(
     `SELECT s.id, s.tecnico_id, u.nombre as tecnico_nombre,
-            s.semana_del_mes, s.dia_semana, s.es_bucle, s.activo
+            s.semana_del_mes, s.dia_semana,
+            DATE_FORMAT(s.fecha, '%Y-%m-%d') AS fecha,
+            s.es_bucle, s.activo
      FROM schedule_mercadolibre s
      JOIN users u ON u.id = s.tecnico_id
      WHERE s.activo = 1
-     ORDER BY s.semana_del_mes ASC, s.dia_semana ASC`
+     ORDER BY s.semana_del_mes ASC, s.dia_semana ASC, s.fecha ASC`
   )
   res.json(rows)
 }
 
 // POST /api/schedule-ml — crear entrada
+// Dos modos:
+//  - Bucle (recurrente): { tecnico_id, semana_del_mes, dia_semana, es_bucle: 1 }
+//  - Puntual (un solo día, fuera del bucle): { tecnico_id, fecha: 'YYYY-MM-DD', es_bucle: 0 }
 export async function crearSchedule(req, res) {
-  const { tecnico_id, semana_del_mes, dia_semana, es_bucle } = req.body
-  if (!tecnico_id || !semana_del_mes || !dia_semana) {
-    return res.status(400).json({ error: 'tecnico_id, semana_del_mes y dia_semana son requeridos' })
+  const { tecnico_id, semana_del_mes, dia_semana, fecha } = req.body
+  if (!tecnico_id) {
+    return res.status(400).json({ error: 'tecnico_id es requerido' })
+  }
+
+  const esPuntual = fecha != null && fecha !== ''
+
+  if (esPuntual) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      return res.status(400).json({ error: 'Fecha inválida (YYYY-MM-DD)' })
+    }
+    const [r] = await pool.execute(
+      `INSERT INTO schedule_mercadolibre (tecnico_id, semana_del_mes, dia_semana, fecha, es_bucle)
+       VALUES (?, NULL, NULL, ?, 0)
+       ON DUPLICATE KEY UPDATE activo = 1`,
+      [tecnico_id, fecha]
+    )
+    await pool.execute(`UPDATE users SET ml_habilitado = 1 WHERE id = ?`, [tecnico_id])
+    return res.status(201).json({ id: r.insertId || null, ok: true })
+  }
+
+  if (!semana_del_mes || !dia_semana) {
+    return res.status(400).json({ error: 'semana_del_mes y dia_semana son requeridos (o fecha, para un día puntual)' })
   }
   const [r] = await pool.execute(
-    `INSERT INTO schedule_mercadolibre (tecnico_id, semana_del_mes, dia_semana, es_bucle)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO schedule_mercadolibre (tecnico_id, semana_del_mes, dia_semana, fecha, es_bucle)
+     VALUES (?, ?, ?, NULL, 1)
      ON DUPLICATE KEY UPDATE es_bucle = VALUES(es_bucle), activo = 1`,
-    [tecnico_id, semana_del_mes, dia_semana, es_bucle ? 1 : 1]
+    [tecnico_id, semana_del_mes, dia_semana]
   )
   // Apenas se le asigna el primer día, queda habilitado para ver la card de
   // ML y marcar presentismo — sin esto, no ve nada de Mercado Libre.
@@ -69,6 +94,17 @@ export async function getScheduleMes(req, res) {
      WHERE s.activo = 1 AND s.es_bucle = 1`
   )
 
+  // Asignaciones puntuales (un solo día, fuera del bucle) que caen en este mes
+  const [puntuales] = await pool.execute(
+    `SELECT s.tecnico_id, u.nombre as tecnico_nombre,
+            DATE_FORMAT(s.fecha, '%Y-%m-%d') AS fecha
+     FROM schedule_mercadolibre s
+     JOIN users u ON u.id = s.tecnico_id
+     WHERE s.activo = 1 AND s.es_bucle = 0
+       AND DATE_FORMAT(s.fecha, '%Y-%m') = ?`,
+    [`${anio}-${String(mes).padStart(2, '0')}`]
+  )
+
   // Calcular qué días del mes corresponden a cada entrada
   const diasML = []
   const primerDia = new Date(anio, mes - 1, 1)
@@ -97,6 +133,21 @@ export async function getScheduleMes(req, res) {
       })
     })
   }
+
+  // Agregar los días puntuales — no dependen del cálculo de semana, van
+  // directo por su fecha exacta
+  puntuales.forEach(p => {
+    const dia    = parseInt(p.fecha.split('-')[2], 10)
+    const diaSem = new Date(anio, mes - 1, dia).getDay()
+    diasML.push({
+      fecha:          p.fecha,
+      tecnico_id:     p.tecnico_id,
+      tecnico_nombre: p.tecnico_nombre,
+      dia_semana:     diaSem,
+      semana_del_mes: null,
+      es_puntual:     true,
+    })
+  })
 
   res.json(diasML)
 }
