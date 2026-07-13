@@ -17,6 +17,7 @@ import asistenciasRouter   from './routes/asistenciasRouter.js'
 // Rutas nuevas — sistema de clientes
 import catalogoRouter      from './routes/catalogo.js'
 import scheduleMLRouter    from './routes/scheduleML.js'
+import inventarioMLRouter  from './routes/inventarioML.js'
 import clientesRouter      from './routes/clientes.js'
 import visitasRouter       from './routes/visitas.js'
 import relevamientosRouter from './routes/relevamientos.js'
@@ -81,6 +82,7 @@ app.use('/api/asistencias',  requireAuth, asistenciasRouter)
 // ── Rutas nuevas — sistema de clientes ───────────────────────────────────────
 app.use('/api/catalogo',      catalogoRouter)       // auth dentro de cada ruta
 app.use('/api/schedule-ml',   scheduleMLRouter)
+app.use('/api/ml-inventario', inventarioMLRouter)
 app.use('/api/clientes',      clientesRouter)
 app.use('/api/visitas',       requireAuth, visitasRouter)
 app.use('/api/relevamientos', requireAuth, relevamientosRouter)
