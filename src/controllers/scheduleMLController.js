@@ -110,6 +110,15 @@ export async function getScheduleMes(req, res) {
   const primerDia = new Date(anio, mes - 1, 1)
   const ultimoDia = new Date(anio, mes, 0).getDate()
 
+  // Como la semana del ciclo es continua (no reinicia con el mes), un mismo
+  // día de la semana puede repetirse 5 veces en un mes de 29-31 días, y la
+  // 1ra y la 5ta ocurrencia caen en la misma semana del ciclo (28 días =
+  // exactamente 4 semanas). Sin este control, esa 5ta ocurrencia —casi
+  // siempre el primer o el último día del mes— se agregaba de nuevo como si
+  // también le tocara al técnico. Nos quedamos solo con la primera
+  // coincidencia real del mes por técnico+día de la semana.
+  const yaAsignado = new Set()
+
   for (let dia = 1; dia <= ultimoDia; dia++) {
     const fecha  = new Date(anio, mes - 1, dia)
     const diaSem = fecha.getDay() // 0=dom, 1=lun... 6=sab
@@ -124,6 +133,10 @@ export async function getScheduleMes(req, res) {
     )
 
     matches.forEach(m => {
+      const clave = `${m.tecnico_id}-${diaSem}`
+      if (yaAsignado.has(clave)) return
+      yaAsignado.add(clave)
+
       diasML.push({
         fecha:          `${anio}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`,
         tecnico_id:     m.tecnico_id,
