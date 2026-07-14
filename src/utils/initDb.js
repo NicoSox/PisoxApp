@@ -359,14 +359,16 @@ CREATE TABLE IF NOT EXISTS notificaciones (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ── 14b. Chat — soporte y conversaciones internas ────────────────────────────
--- tipo 'soporte'  = cliente↔soporte o técnico/relevador↔soporte (responsable_id puede ser admin o superadmin)
--- tipo 'tecnico'  = cliente↔técnico asignado a una visita puntual
+-- tipo 'soporte'  = cliente↔soporte o técnico/relevador↔soporte (responsable_id puede ser admin o superadmin), sin vincular a nada puntual
+-- tipo 'tecnico'  = cliente↔técnico asignado a una visita puntual (puede iniciarlo cualquiera de los dos)
+-- tipo 'equipo'   = consulta interna del equipo sobre un cliente/visita o un ticket de trabajo — siempre vinculada a visita_id o ticket_id, va a la cola de admin/superadmin
 CREATE TABLE IF NOT EXISTS chats (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   iniciado_por_id INT UNSIGNED NOT NULL,
   responsable_id  INT UNSIGNED DEFAULT NULL,
-  tipo            ENUM('soporte','tecnico') NOT NULL DEFAULT 'soporte',
+  tipo            ENUM('soporte','tecnico','equipo') NOT NULL DEFAULT 'soporte',
   visita_id       INT UNSIGNED DEFAULT NULL,
+  ticket_id       INT UNSIGNED DEFAULT NULL,
   titulo          VARCHAR(150) DEFAULT NULL,
   estado          ENUM('abierto','cerrado') NOT NULL DEFAULT 'abierto',
   created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -374,7 +376,8 @@ CREATE TABLE IF NOT EXISTS chats (
   closed_at       DATETIME DEFAULT NULL,
   CONSTRAINT fk_chat_iniciador   FOREIGN KEY (iniciado_por_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_chat_responsable FOREIGN KEY (responsable_id)  REFERENCES users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_chat_visita      FOREIGN KEY (visita_id)       REFERENCES visitas_tecnicas(id) ON DELETE SET NULL
+  CONSTRAINT fk_chat_visita      FOREIGN KEY (visita_id)       REFERENCES visitas_tecnicas(id) ON DELETE SET NULL,
+  CONSTRAINT fk_chat_ticket      FOREIGN KEY (ticket_id)       REFERENCES tickets(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS chat_mensajes (

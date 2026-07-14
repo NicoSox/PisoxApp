@@ -7,7 +7,8 @@ function puedeVer(chat, user) {
   if (user.rol === 'superadmin') return true
   if (chat.iniciado_por_id === user.id) return true
   if (chat.responsable_id === user.id) return true
-  if (user.rol === 'admin' && chat.tipo === 'soporte') return true
+  // 'soporte' y 'equipo' sin tomar todavía van a la cola de admin/superadmin
+  if (user.rol === 'admin' && ['soporte', 'equipo'].includes(chat.tipo)) return true
   return false
 }
 
@@ -27,6 +28,7 @@ export async function listChats(req, res) {
            u1.nombre as iniciador_nombre, u1.rol as iniciador_rol,
            u2.nombre as responsable_nombre, u2.rol as responsable_rol,
            p.nombre as propiedad_nombre,
+           tk.codigo as ticket_codigo, tk.titulo as ticket_titulo,
            (SELECT mensaje FROM chat_mensajes m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) as ultimo_mensaje,
            (SELECT created_at FROM chat_mensajes m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) as ultimo_mensaje_at,
            (SELECT COUNT(*) FROM chat_mensajes m WHERE m.chat_id = c.id) as total_mensajes
@@ -35,13 +37,14 @@ export async function listChats(req, res) {
     LEFT JOIN users u2 ON u2.id = c.responsable_id
     LEFT JOIN visitas_tecnicas v ON v.id = c.visita_id
     LEFT JOIN propiedades p ON p.id = v.propiedad_id
+    LEFT JOIN tickets tk ON tk.id = c.ticket_id
     WHERE 1=1`
   const params = []
 
   if (req.user.rol === 'superadmin') {
     // ve todo, sin filtro adicional
   } else if (req.user.rol === 'admin') {
-    sql += ' AND (c.tipo = "soporte" OR c.responsable_id = ?)'
+    sql += ' AND (c.tipo IN ("soporte", "equipo") OR c.responsable_id = ?)'
     params.push(req.user.id)
   } else {
     // cliente, técnico, relevador: solo lo propio
@@ -60,12 +63,14 @@ export async function getChat(req, res) {
     `SELECT c.*,
             u1.nombre as iniciador_nombre, u1.rol as iniciador_rol,
             u2.nombre as responsable_nombre, u2.rol as responsable_rol,
-            p.nombre as propiedad_nombre, p.direccion
+            p.nombre as propiedad_nombre, p.direccion,
+            tk.codigo as ticket_codigo, tk.titulo as ticket_titulo
      FROM chats c
      JOIN users u1 ON u1.id = c.iniciado_por_id
      LEFT JOIN users u2 ON u2.id = c.responsable_id
      LEFT JOIN visitas_tecnicas v ON v.id = c.visita_id
      LEFT JOIN propiedades p ON p.id = v.propiedad_id
+     LEFT JOIN tickets tk ON tk.id = c.ticket_id
      WHERE c.id = ?`,
     [req.params.id]
   )
@@ -95,13 +100,15 @@ export async function getMensajes(req, res) {
 
 // ── CREAR CHAT ─────────────────────────────────────────────────────────────
 export async function crearChat(req, res) {
-  const { mensaje, visita_id } = req.body
+  const { mensaje, visita_id, ticket_id, destino } = req.body
   let { tipo } = req.body
 
   if (!mensaje?.trim()) return res.status(400).json({ error: 'El mensaje es requerido' })
 
   let responsableId = null
-  let tituloAuto = null
+  let tituloAuto    = null
+  let visitaIdFinal = null
+  let ticketIdFinal = null
 
   if (req.user.rol === 'user') {
     // Cliente: 'soporte' (va a la cola) o 'tecnico' (sobre una visita con técnico ya asignado)
@@ -116,22 +123,68 @@ export async function crearChat(req, res) {
       if (visita.user_id !== req.user.id) return res.status(403).json({ error: 'Sin permisos' })
       if (!visita.tecnico_asignado_id) return res.status(400).json({ error: 'Esta visita todavía no tiene técnico asignado' })
       responsableId = visita.tecnico_asignado_id
-      tituloAuto = `Consulta sobre visita #${visita_id}`
+      tituloAuto    = `Consulta sobre visita #${visita_id}`
+      visitaIdFinal = visita_id
     } else {
       tipo = 'soporte'
     }
   } else if (['tecnico', 'relevador'].includes(req.user.rol)) {
-    tipo = 'soporte' // siempre hablan con soporte, nunca crean chat tipo 'tecnico'
+    if (tipo === 'equipo') {
+      // Consulta de equipo: SIEMPRE vinculada a una visita (cliente) o a un
+      // ticket interno — nunca queda "suelta". El destino puede ser el
+      // propio cliente de esa visita, o la cola de admin/superadmin.
+      if (visita_id) {
+        const [[visita]] = await pool.execute(
+          `SELECT v.*, c.user_id, u.nombre as cliente_nombre
+           FROM visitas_tecnicas v
+           JOIN clientes c ON c.id = v.cliente_id
+           LEFT JOIN users u ON u.id = c.user_id
+           WHERE v.id = ?`,
+          [visita_id]
+        )
+        if (!visita) return res.status(404).json({ error: 'Visita no encontrada' })
+        visitaIdFinal = visita_id
+
+        if (destino === 'cliente') {
+          if (visita.tecnico_asignado_id !== req.user.id) {
+            return res.status(403).json({ error: 'Solo podés escribirle al cliente de una visita que tengas asignada' })
+          }
+          if (!visita.user_id) return res.status(400).json({ error: 'Este cliente todavía no tiene cuenta habilitada en la app' })
+          responsableId = visita.user_id
+          tipo          = 'tecnico' // misma categoría que el chat cliente↔técnico sobre esa visita
+          tituloAuto    = `Consulta sobre visita #${visita_id}`
+        } else {
+          responsableId = null // a la cola de admin/superadmin
+          tituloAuto     = `Consulta de equipo — ${visita.cliente_nombre || 'cliente'} (visita #${visita_id})`
+        }
+      } else if (ticket_id) {
+        const [[ticket]] = await pool.execute(`SELECT * FROM tickets WHERE id = ?`, [ticket_id])
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado' })
+        ticketIdFinal  = ticket_id
+        responsableId  = null
+        tituloAuto     = `Consulta de equipo — Ticket ${ticket.codigo}`
+      } else {
+        return res.status(400).json({ error: 'Elegí a qué visita o ticket se refiere la consulta de equipo' })
+      }
+    } else {
+      tipo = 'soporte' // consulta general con soporte, sin vincular a nada puntual
+    }
   } else {
-    // admin/superadmin creando un chat (caso raro, pero lo permitimos)
-    tipo = 'soporte'
-    responsableId = req.user.id
+    // admin/superadmin creando un chat
+    if (tipo === 'equipo' && (visita_id || ticket_id)) {
+      if (visita_id) visitaIdFinal = visita_id
+      if (ticket_id) ticketIdFinal = ticket_id
+      responsableId = null
+    } else {
+      tipo          = 'soporte'
+      responsableId = req.user.id
+    }
   }
 
   const [r] = await pool.execute(
-    `INSERT INTO chats (iniciado_por_id, responsable_id, tipo, visita_id, titulo)
-     VALUES (?, ?, ?, ?, ?)`,
-    [req.user.id, responsableId, tipo, visita_id || null, tituloAuto]
+    `INSERT INTO chats (iniciado_por_id, responsable_id, tipo, visita_id, ticket_id, titulo)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [req.user.id, responsableId, tipo, visitaIdFinal, ticketIdFinal, tituloAuto]
   )
   const chatId = r.insertId
 
@@ -143,7 +196,8 @@ export async function crearChat(req, res) {
   if (responsableId) {
     await notificar(responsableId, 'Nuevo mensaje', `${req.user.nombre}: ${mensaje.trim()}`, 'chat', chatId)
   } else {
-    await notificarAdmins('Nueva consulta de soporte', `${req.user.nombre}: ${mensaje.trim()}`, 'chat', chatId)
+    const titulo = tipo === 'equipo' ? 'Nueva consulta de equipo' : 'Nueva consulta de soporte'
+    await notificarAdmins(titulo, `${req.user.nombre}: ${mensaje.trim()}`, 'chat', chatId)
   }
 
   res.status(201).json({ id: chatId, ok: true })
