@@ -28,6 +28,7 @@ export async function listChats(req, res) {
            u1.nombre as iniciador_nombre, u1.rol as iniciador_rol,
            u2.nombre as responsable_nombre, u2.rol as responsable_rol,
            p.nombre as propiedad_nombre,
+           cu.nombre as cliente_nombre,
            tk.codigo as ticket_codigo, tk.titulo as ticket_titulo,
            (SELECT mensaje FROM chat_mensajes m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) as ultimo_mensaje,
            (SELECT created_at FROM chat_mensajes m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) as ultimo_mensaje_at,
@@ -37,6 +38,8 @@ export async function listChats(req, res) {
     LEFT JOIN users u2 ON u2.id = c.responsable_id
     LEFT JOIN visitas_tecnicas v ON v.id = c.visita_id
     LEFT JOIN propiedades p ON p.id = v.propiedad_id
+    LEFT JOIN clientes cl ON cl.id = v.cliente_id
+    LEFT JOIN users cu ON cu.id = cl.user_id
     LEFT JOIN tickets tk ON tk.id = c.ticket_id
     WHERE 1=1`
   const params = []
@@ -64,12 +67,15 @@ export async function getChat(req, res) {
             u1.nombre as iniciador_nombre, u1.rol as iniciador_rol,
             u2.nombre as responsable_nombre, u2.rol as responsable_rol,
             p.nombre as propiedad_nombre, p.direccion,
+            cu.nombre as cliente_nombre,
             tk.codigo as ticket_codigo, tk.titulo as ticket_titulo
      FROM chats c
      JOIN users u1 ON u1.id = c.iniciado_por_id
      LEFT JOIN users u2 ON u2.id = c.responsable_id
      LEFT JOIN visitas_tecnicas v ON v.id = c.visita_id
      LEFT JOIN propiedades p ON p.id = v.propiedad_id
+     LEFT JOIN clientes cl ON cl.id = v.cliente_id
+     LEFT JOIN users cu ON cu.id = cl.user_id
      LEFT JOIN tickets tk ON tk.id = c.ticket_id
      WHERE c.id = ?`,
     [req.params.id]
@@ -106,7 +112,6 @@ export async function crearChat(req, res) {
   if (!mensaje?.trim()) return res.status(400).json({ error: 'El mensaje es requerido' })
 
   let responsableId = null
-  let tituloAuto    = null
   let visitaIdFinal = null
   let ticketIdFinal = null
 
@@ -123,7 +128,6 @@ export async function crearChat(req, res) {
       if (visita.user_id !== req.user.id) return res.status(403).json({ error: 'Sin permisos' })
       if (!visita.tecnico_asignado_id) return res.status(400).json({ error: 'Esta visita todavía no tiene técnico asignado' })
       responsableId = visita.tecnico_asignado_id
-      tituloAuto    = `Consulta sobre visita #${visita_id}`
       visitaIdFinal = visita_id
     } else {
       tipo = 'soporte'
@@ -135,10 +139,9 @@ export async function crearChat(req, res) {
       // propio cliente de esa visita, o la cola de admin/superadmin.
       if (visita_id) {
         const [[visita]] = await pool.execute(
-          `SELECT v.*, c.user_id, u.nombre as cliente_nombre
+          `SELECT v.*, c.user_id
            FROM visitas_tecnicas v
            JOIN clientes c ON c.id = v.cliente_id
-           LEFT JOIN users u ON u.id = c.user_id
            WHERE v.id = ?`,
           [visita_id]
         )
@@ -152,17 +155,14 @@ export async function crearChat(req, res) {
           if (!visita.user_id) return res.status(400).json({ error: 'Este cliente todavía no tiene cuenta habilitada en la app' })
           responsableId = visita.user_id
           tipo          = 'tecnico' // misma categoría que el chat cliente↔técnico sobre esa visita
-          tituloAuto    = `Consulta sobre visita #${visita_id}`
         } else {
           responsableId = null // a la cola de admin/superadmin
-          tituloAuto     = `Consulta de equipo — ${visita.cliente_nombre || 'cliente'} (visita #${visita_id})`
         }
       } else if (ticket_id) {
-        const [[ticket]] = await pool.execute(`SELECT * FROM tickets WHERE id = ?`, [ticket_id])
+        const [[ticket]] = await pool.execute(`SELECT id FROM tickets WHERE id = ?`, [ticket_id])
         if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado' })
         ticketIdFinal  = ticket_id
         responsableId  = null
-        tituloAuto     = `Consulta de equipo — Ticket ${ticket.codigo}`
       } else {
         return res.status(400).json({ error: 'Elegí a qué visita o ticket se refiere la consulta de equipo' })
       }
@@ -181,10 +181,14 @@ export async function crearChat(req, res) {
     }
   }
 
+  // El "titulo" ya no se arma acá en un idioma fijo — el front lo arma con
+  // lang + los datos crudos (cliente_nombre, propiedad_nombre, ticket_*)
+  // que ya vienen en la respuesta de listChats/getChat, igual que hace con
+  // el resto de los textos de la UI.
   const [r] = await pool.execute(
-    `INSERT INTO chats (iniciado_por_id, responsable_id, tipo, visita_id, ticket_id, titulo)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [req.user.id, responsableId, tipo, visitaIdFinal, ticketIdFinal, tituloAuto]
+    `INSERT INTO chats (iniciado_por_id, responsable_id, tipo, visita_id, ticket_id)
+     VALUES (?, ?, ?, ?, ?)`,
+    [req.user.id, responsableId, tipo, visitaIdFinal, ticketIdFinal]
   )
   const chatId = r.insertId
 
