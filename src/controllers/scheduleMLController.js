@@ -116,7 +116,16 @@ export async function getScheduleMes(req, res) {
   // exactamente 4 semanas). Sin este control, esa 5ta ocurrencia —casi
   // siempre el primer o el último día del mes— se agregaba de nuevo como si
   // también le tocara al técnico. Nos quedamos solo con la primera
-  // coincidencia real del mes por técnico+día de la semana.
+  // coincidencia real del mes por técnico+día de la semana+semana del ciclo.
+  //
+  // OJO: la clave tiene que incluir semanaMes. Un técnico puede tener MÁS DE
+  // una combinación semana+día asignada (ej. semana 1 Y semana 3, ambas los
+  // lunes — la pantalla de asignación permite elegir varias semanas y
+  // varios días a la vez, generando una entrada por cada combinación). Si la
+  // clave fuera solo "técnico+día de la semana" (como estaba antes), la
+  // segunda combinación real (semana 3, lunes) se descartaba como si fuera
+  // el mismo duplicado que la primera (semana 1, lunes), perdiendo días
+  // asignados de verdad.
   const yaAsignado = new Set()
 
   for (let dia = 1; dia <= ultimoDia; dia++) {
@@ -133,7 +142,7 @@ export async function getScheduleMes(req, res) {
     )
 
     matches.forEach(m => {
-      const clave = `${m.tecnico_id}-${diaSem}`
+      const clave = `${m.tecnico_id}-${diaSem}-${semanaMes}`
       if (yaAsignado.has(clave)) return
       yaAsignado.add(clave)
 
