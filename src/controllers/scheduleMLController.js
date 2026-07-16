@@ -113,19 +113,22 @@ export async function getScheduleMes(req, res) {
   // Como la semana del ciclo es continua (no reinicia con el mes), un mismo
   // día de la semana puede repetirse 5 veces en un mes de 29-31 días, y la
   // 1ra y la 5ta ocurrencia caen en la misma semana del ciclo (28 días =
-  // exactamente 4 semanas). Sin este control, esa 5ta ocurrencia —casi
-  // siempre el primer o el último día del mes— se agregaba de nuevo como si
-  // también le tocara al técnico. Nos quedamos solo con la primera
-  // coincidencia real del mes por técnico+día de la semana+semana del ciclo.
+  // exactamente 4 semanas). ESO NO ES UN DUPLICADO: son dos fechas reales y
+  // distintas en las que, legítimamente, le toca ir al técnico (la rotación
+  // es continua — por eso vuelve a tocarle 4 semanas después, aunque las
+  // dos caigan dentro del mismo mes calendario). Antes acá se descartaba la
+  // 2da ocurrencia como si fuera un duplicado de la 1ra, y esa era la causa
+  // de que, por ejemplo, el lunes quedara marcado pero el viernes de esa
+  // misma semana real no (cuando el mes cortaba a mitad de semana): el
+  // viernes "extra" del final del mes se tomaba como duplicado del viernes
+  // de semanas atrás y se tiraba.
   //
-  // OJO: la clave tiene que incluir semanaMes. Un técnico puede tener MÁS DE
-  // una combinación semana+día asignada (ej. semana 1 Y semana 3, ambas los
-  // lunes — la pantalla de asignación permite elegir varias semanas y
-  // varios días a la vez, generando una entrada por cada combinación). Si la
-  // clave fuera solo "técnico+día de la semana" (como estaba antes), la
-  // segunda combinación real (semana 3, lunes) se descartaba como si fuera
-  // el mismo duplicado que la primera (semana 1, lunes), perdiendo días
-  // asignados de verdad.
+  // La clave única de la tabla (tecnico_id, semana_del_mes, dia_semana) ya
+  // impide que haya dos FILAS iguales en la base para la misma combinación,
+  // así que acá solo hace falta evitar contar la misma fila dos veces para
+  // la MISMA fecha exacta (no puede pasar en este loop porque cada día del
+  // mes se recorre una sola vez, pero se deja la protección por si en algún
+  // momento se cruzan otras fuentes de datos para la misma fecha).
   const yaAsignado = new Set()
 
   for (let dia = 1; dia <= ultimoDia; dia++) {
@@ -142,7 +145,9 @@ export async function getScheduleMes(req, res) {
     )
 
     matches.forEach(m => {
-      const clave = `${m.tecnico_id}-${diaSem}-${semanaMes}`
+      // Clave por FECHA exacta (no por semana+día), para no perder
+      // ocurrencias reales distintas que caen en la misma semana del ciclo.
+      const clave = `${m.tecnico_id}-${anio}-${mes}-${dia}`
       if (yaAsignado.has(clave)) return
       yaAsignado.add(clave)
 
