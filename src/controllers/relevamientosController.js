@@ -162,16 +162,89 @@ export async function updateRelevamiento(req, res) {
     ]
   )
 
-  // Si se marca como enviado, notificar admins y cerrar la visita asociada
+  // Si se marca como enviado, notificar admins, cerrar la visita asociada
   // (esto es lo que destraba el siguiente turno en la cola del relevador)
+  // y generar automáticamente el borrador de presupuesto + el trabajo del
+  // cliente ya vinculados, para que el admin solo tenga que completar los
+  // precios en vez de tipear todo de nuevo a mano.
   if (estado === 'enviado' && rel.estado !== 'enviado') {
     await pool.execute(
       `UPDATE visitas_tecnicas SET estado='realizada' WHERE id=?`,
       [rel.visita_id]
     )
+
+    const [[ctx]] = await pool.execute(
+      `SELECT v.propiedad_id, v.cliente_id,
+              p.nombre as propiedad_nombre, p.direccion,
+              c.telefono, cu.nombre as cliente_nombre
+       FROM visitas_tecnicas v
+       JOIN propiedades p ON p.id = v.propiedad_id
+       JOIN clientes c ON c.id = v.cliente_id
+       JOIN users cu ON cu.id = c.user_id
+       WHERE v.id = ?`,
+      [rel.visita_id]
+    )
+
+    const tipoTrabajoId = tipo_trabajo_id || rel.tipo_trabajo_id
+    let tipoTrabajoNombre = null
+    if (tipoTrabajoId) {
+      const [[tt]] = await pool.execute(`SELECT nombre FROM tipos_trabajo WHERE id = ?`, [tipoTrabajoId])
+      tipoTrabajoNombre = tt?.nombre || null
+    }
+
+    const descripcionFinal = descripcion || rel.descripcion
+    const horasFinal        = horas_estimadas || rel.horas_estimadas || 1
+    const herramientasFinal = herramientas || rel.herramientas
+    const materialesFinal   = materiales_notas || rel.materiales_notas
+    const notasAdicFinal    = notas_adicionales || rel.notas_adicionales
+
+    // Notas del presupuesto: volcamos todo lo que cargó el relevador para que
+    // el admin tenga el contexto completo a la vista al momento de precificar.
+    const notasPresupuesto = [
+      descripcionFinal ? `Relevamiento: ${descripcionFinal}` : null,
+      herramientasFinal ? `Herramientas necesarias: ${herramientasFinal}` : null,
+      materialesFinal ? `Materiales: ${materialesFinal}` : null,
+      notasAdicFinal ? `Notas adicionales: ${notasAdicFinal}` : null,
+    ].filter(Boolean).join('\n')
+
+    const [[{ maxNum }]] = await pool.query('SELECT COALESCE(MAX(numero), 480) as maxNum FROM presupuestos')
+    const numero = maxNum + 1
+
+    const [presRes] = await pool.execute(
+      `INSERT INTO presupuestos
+        (numero, fecha, cliente_nombre, cliente_telefono, cliente_domicilio,
+         mano_obra, materiales, incluir_materiales,
+         iva_porcentaje, solicitar_adelanto, porcentaje_adelanto,
+         subtotal_mano_obra, subtotal_materiales, total, notas, estado)
+       VALUES (?, CURDATE(), ?, ?, ?, ?, '[]', 0, 0, 0, 50, 0, 0, 0, ?, 'borrador')`,
+      [
+        numero,
+        ctx.cliente_nombre,
+        ctx.telefono || '',
+        `${ctx.propiedad_nombre} — ${ctx.direccion}`,
+        JSON.stringify([{ descripcion: tipoTrabajoNombre || 'Mano de obra', cantidad: horasFinal, precio_unitario: 0 }]),
+        notasPresupuesto || null,
+      ]
+    )
+    const presupuestoId = presRes.insertId
+
+    await pool.execute(
+      `INSERT INTO trabajos_cliente
+        (propiedad_id, cliente_id, tipo_trabajo_id, subtipo_trabajo_id,
+         visita_id, relevamiento_id, presupuesto_id, titulo, descripcion, estado)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'presupuestando')`,
+      [
+        ctx.propiedad_id, ctx.cliente_id,
+        tipoTrabajoId || null, subtipo_trabajo_id || rel.subtipo_trabajo_id || null,
+        rel.visita_id, rel.id, presupuestoId,
+        tipoTrabajoNombre || 'Trabajo a presupuestar',
+        descripcionFinal,
+      ]
+    )
+
     await notificarAdmins(
       'Relevamiento enviado',
-      `El técnico ${req.user.nombre} marcó el relevamiento como enviado. Listo para presupuestar.`,
+      `El técnico ${req.user.nombre} cargó el relevamiento de "${ctx.propiedad_nombre}". Ya generamos el borrador del presupuesto #${numero} — completá los precios y enviaselo al cliente.`,
       'visita',
       rel.visita_id
     )

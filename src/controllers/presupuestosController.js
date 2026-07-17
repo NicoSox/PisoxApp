@@ -1,4 +1,5 @@
 import pool from '../utils/db.js'
+import { notificar } from '../services/pushService.js'
 
 // ── Helpers ───────────────────────────────────────────────────
 function parseJSON(val, fallback = []) {
@@ -82,6 +83,11 @@ export async function actualizar(req, res) {
     notas, estado,
   } = req.body
 
+  const [[previo]] = await pool.query(
+    `SELECT estado FROM presupuestos WHERE id = ?`, [req.params.id]
+  )
+  if (!previo) return res.status(404).json({ error: 'No encontrado' })
+
   await pool.query(
     `UPDATE presupuestos SET
       fecha=?, cliente_nombre=?, cliente_telefono=?, cliente_domicilio=?,
@@ -109,6 +115,34 @@ export async function actualizar(req, res) {
       req.params.id,
     ]
   )
+
+  // Si el presupuesto pasa a 'enviado' y está vinculado a un trabajo de cliente
+  // (generado automáticamente al completar un relevamiento), ese es el momento
+  // en que el cliente realmente lo ve: promovemos el trabajo de 'presupuestando'
+  // (interno, invisible para el cliente) a 'presupuestado' (visible, esperando
+  // su aprobación) y le avisamos.
+  if (estado === 'enviado' && previo.estado !== 'enviado') {
+    const [[trabajo]] = await pool.query(
+      `SELECT tc.id, tc.titulo, c.user_id as cliente_user_id
+       FROM trabajos_cliente tc
+       JOIN clientes c ON c.id = tc.cliente_id
+       WHERE tc.presupuesto_id = ? AND tc.estado = 'presupuestando'`,
+      [req.params.id]
+    )
+    if (trabajo) {
+      await pool.query(
+        `UPDATE trabajos_cliente SET estado = 'presupuestado' WHERE id = ?`,
+        [trabajo.id]
+      )
+      await notificar(
+        trabajo.cliente_user_id,
+        'Nuevo presupuesto',
+        `Te enviamos el presupuesto para "${trabajo.titulo}". Revisalo en la app para aprobarlo o rechazarlo.`,
+        'trabajo', trabajo.id
+      )
+    }
+  }
+
   res.json({ ok: true })
 }
 

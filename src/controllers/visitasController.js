@@ -54,6 +54,15 @@ export async function getDisponibilidad(req, res) {
   )
   const jornadaHoras = parseFloat(cfgHoras?.valor || 8)
 
+  // Días habilitados para relevamiento (configurables por el superadmin desde
+  // Configuración). Ej: '3' = solo miércoles, '1,5' = solo lunes y viernes.
+  const [[cfgDias]] = await pool.execute(
+    `SELECT valor FROM configuracion WHERE clave = 'dias_relevamiento'`
+  )
+  const diasHabilitados = new Set(
+    (cfgDias?.valor || '1,2,3,4,5').split(',').map(n => parseInt(n.trim(), 10))
+  )
+
   // Técnicos que cubren esta zona
   const [tecnicos] = await pool.execute(
     `SELECT DISTINCT tz.tecnico_id, u.nombre
@@ -72,7 +81,7 @@ export async function getDisponibilidad(req, res) {
 
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const diaSem = d.getDay()
-    if (diaSem === 0 || diaSem === 6) continue // no fines de semana
+    if (!diasHabilitados.has(diaSem)) continue // solo los días que el superadmin habilitó para relevamiento
 
     const fechaStr = fechaALocalStr(d)
 
