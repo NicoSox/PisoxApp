@@ -2,6 +2,21 @@
 import pool from '../utils/db.js'
 import { notificar } from '../services/pushService.js'
 
+// ── HELPERS DE FECHA (evitan corrimiento de día por UTC) ───────────────────────
+// new Date('YYYY-MM-DD') se interpreta como medianoche UTC. En servidores con
+// zona horaria negativa (ej. Argentina, UTC-3) eso puede caer en el día anterior
+// al leerlo con .getDay()/.getDate() en hora local, salteando días por error.
+function parseFechaLocal(fechaStr) {
+  const [y, m, d] = fechaStr.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+function fechaALocalStr(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dia}`
+}
+
 /**
  * Descuenta horas de disponibilidad del técnico
  */
@@ -39,14 +54,14 @@ export async function getTurnosDisponibles(req, res) {
   if (!tecnicos.length) return res.json([])
 
   const result = []
-  const start = new Date(desde)
-  const end   = new Date(hasta)
+  const start = parseFechaLocal(desde)
+  const end   = parseFechaLocal(hasta)
 
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const diaSem = d.getDay()
     if (diaSem === 0 || diaSem === 6) continue
 
-    const fechaStr = d.toISOString().slice(0, 10)
+    const fechaStr = fechaALocalStr(d)
 
     for (const franja of ['mañana', 'tarde']) {
       const tecnicosDisp = []

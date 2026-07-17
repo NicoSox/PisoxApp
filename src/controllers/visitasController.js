@@ -2,13 +2,29 @@
 import pool from '../utils/db.js'
 import { notificar, notificarAdmins } from '../services/pushService.js'
 
+// ── HELPERS DE FECHA (evitan corrimiento de día por UTC) ───────────────────────
+// new Date('YYYY-MM-DD') se interpreta como medianoche UTC. En servidores con
+// zona horaria negativa (ej. Argentina, UTC-3) eso puede caer en el día anterior
+// al leerlo con .getDay()/.getDate() en hora local, salteando días por error.
+// Estos helpers trabajan siempre con año/mes/día explícitos, sin pasar por UTC.
+function parseFechaLocal(fechaStr) {
+  const [y, m, d] = fechaStr.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+function fechaALocalStr(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dia}`
+}
+
 // ── DISPONIBILIDAD ────────────────────────────────────────────────────────────
 
 /**
  * Calcula si un técnico va a ML en una fecha dada
  */
 async function tecnicoEnML(tecnicoId, fecha) {
-  const d = new Date(fecha)
+  const d = parseFechaLocal(fecha)
   const diaSem = d.getDay() // 1=lun...5=vie
   if (diaSem === 0 || diaSem === 6) return false
   const dia = d.getDate()
@@ -51,14 +67,14 @@ export async function getDisponibilidad(req, res) {
 
   // Iterar días del rango
   const result = []
-  const start = new Date(desde)
-  const end   = new Date(hasta)
+  const start = parseFechaLocal(desde)
+  const end   = parseFechaLocal(hasta)
 
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const diaSem = d.getDay()
     if (diaSem === 0 || diaSem === 6) continue // no fines de semana
 
-    const fechaStr = d.toISOString().slice(0, 10)
+    const fechaStr = fechaALocalStr(d)
 
     for (const franja of ['mañana', 'tarde']) {
       let hayDisponible = false
