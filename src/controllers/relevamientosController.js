@@ -5,6 +5,27 @@ import { notificarAdmins } from '../services/pushService.js'
 const API_URL    = process.env.API_URL || ''
 const UPLOAD_DIR  = process.env.UPLOAD_DIR || 'uploads'
 
+// ── Helpers de fotos_drive ──────────────────────────────────────────────────
+// Blindaje: registros viejos/corruptos a veces guardaron una URL suelta en vez
+// de un array JSON. Si parseamos así nomás, revienta toda la petición.
+function safeParseFotos(val) {
+  if (!val) return []
+  if (Array.isArray(val)) return val
+  try {
+    const parsed = JSON.parse(val)
+    return Array.isArray(parsed) ? parsed : [parsed]
+  } catch {
+    // Valor legado guardado como URL plana (no JSON): la recuperamos como foto única
+    return [val]
+  }
+}
+
+function normalizeFotosParaGuardar(fotos_drive) {
+  if (!fotos_drive) return null
+  const arr = Array.isArray(fotos_drive) ? fotos_drive : [fotos_drive]
+  return JSON.stringify(arr)
+}
+
 // POST /api/relevamientos/upload-foto — sube una foto y devuelve su URL pública
 // (a diferencia del OCR, esta imagen se conserva: queda en uploads/ y servida por express.static)
 export async function uploadFotoRelevamiento(req, res) {
@@ -37,6 +58,7 @@ export async function listRelevamientos(req, res) {
 
   sql += ' ORDER BY r.created_at DESC'
   const [rows] = await pool.execute(sql, params)
+  rows.forEach(r => { r.fotos_drive = safeParseFotos(r.fotos_drive) })
   res.json(rows)
 }
 
@@ -60,7 +82,7 @@ export async function getRelevamiento(req, res) {
     [req.params.id]
   )
   if (!row) return res.status(404).json({ error: 'No encontrado' })
-  row.fotos_drive = row.fotos_drive ? JSON.parse(row.fotos_drive) : []
+  row.fotos_drive = safeParseFotos(row.fotos_drive)
   res.json(row)
 }
 
@@ -88,7 +110,7 @@ export async function createRelevamiento(req, res) {
       herramientas || null,
       horas_estimadas || 1,
       materiales_notas || null,
-      fotos_drive ? JSON.stringify(fotos_drive) : null,
+      fotos_drive ? normalizeFotosParaGuardar(fotos_drive) : null,
       notas_adicionales || null,
     ]
   )
@@ -134,7 +156,7 @@ export async function updateRelevamiento(req, res) {
       herramientas || rel.herramientas,
       horas_estimadas || rel.horas_estimadas,
       materiales_notas || rel.materiales_notas,
-      fotos_drive ? JSON.stringify(fotos_drive) : rel.fotos_drive,
+      fotos_drive ? normalizeFotosParaGuardar(fotos_drive) : rel.fotos_drive,
       notas_adicionales || rel.notas_adicionales,
       estado || rel.estado,
     ]
