@@ -69,12 +69,15 @@ export async function getRelevamiento(req, res) {
             tt.nombre as tipo_trabajo, st.nombre as subtipo_trabajo,
             st.garantia_meses,
             p.nombre as propiedad_nombre, p.direccion,
-            cu.nombre as cliente_nombre
+            cu.nombre as cliente_nombre,
+            e.nombre as entidad_nombre, e.habitacion as entidad_habitacion,
+            e.foto_perfil_url as entidad_foto
      FROM relevamientos r
      JOIN visitas_tecnicas v ON v.id = r.visita_id
      JOIN users u ON u.id = r.tecnico_id
      LEFT JOIN tipos_trabajo tt ON tt.id = r.tipo_trabajo_id
      LEFT JOIN subtipos_trabajo st ON st.id = r.subtipo_trabajo_id
+     LEFT JOIN entidades e ON e.id = r.entidad_id
      JOIN propiedades p ON p.id = v.propiedad_id
      JOIN clientes c ON c.id = v.cliente_id
      JOIN users cu ON cu.id = c.user_id
@@ -88,23 +91,23 @@ export async function getRelevamiento(req, res) {
 
 export async function createRelevamiento(req, res) {
   const {
-    visita_id, tipo_trabajo_id, subtipo_trabajo_id,
+    visita_id, entidad_id, tipo_trabajo_id, subtipo_trabajo_id,
     descripcion, herramientas, horas_estimadas,
     materiales_notas, fotos_drive, notas_adicionales,
   } = req.body
 
-  if (!visita_id || !descripcion) {
-    return res.status(400).json({ error: 'visita_id y descripcion son requeridos' })
+  if (!visita_id || !entidad_id || !descripcion) {
+    return res.status(400).json({ error: 'visita_id, entidad_id y descripcion son requeridos' })
   }
 
   const [r] = await pool.execute(
     `INSERT INTO relevamientos
-     (visita_id, tecnico_id, tipo_trabajo_id, subtipo_trabajo_id,
+     (visita_id, entidad_id, tecnico_id, tipo_trabajo_id, subtipo_trabajo_id,
       descripcion, herramientas, horas_estimadas,
       materiales_notas, fotos_drive, notas_adicionales)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      visita_id, req.user.id,
+      visita_id, entidad_id, req.user.id,
       tipo_trabajo_id || null, subtipo_trabajo_id || null,
       descripcion,
       herramientas || null,
@@ -173,8 +176,11 @@ export async function updateRelevamiento(req, res) {
       [rel.visita_id]
     )
 
+    // La generación del presupuesto/trabajo es una automatización *secundaria*:
+    // si algo acá falla, el relevamiento ya se guardó arriba y no debe perderse
+    // el trabajo del técnico. Ante un fallo, avisamos a admins para que carguen
+    // el presupuesto a mano como respaldo, en vez de cortar toda la petición.
     try {
-      console.log('[relevamiento->presupuesto] paso 1: buscando contexto de la visita', rel.visita_id)
       const [[ctx]] = await pool.execute(
         `SELECT v.propiedad_id, v.cliente_id,
                 p.nombre as propiedad_nombre, p.direccion,
@@ -186,7 +192,6 @@ export async function updateRelevamiento(req, res) {
          WHERE v.id = ?`,
         [rel.visita_id]
       )
-      console.log('[relevamiento->presupuesto] ctx =', ctx)
 
       const tipoTrabajoId = tipo_trabajo_id || rel.tipo_trabajo_id
       let tipoTrabajoNombre = null
@@ -194,63 +199,49 @@ export async function updateRelevamiento(req, res) {
         const [[tt]] = await pool.execute(`SELECT nombre FROM tipos_trabajo WHERE id = ?`, [tipoTrabajoId])
         tipoTrabajoNombre = tt?.nombre || null
       }
-      console.log('[relevamiento->presupuesto] tipoTrabajoId =', tipoTrabajoId, 'nombre =', tipoTrabajoNombre)
 
       const descripcionFinal = descripcion || rel.descripcion
       const horasFinal        = horas_estimadas || rel.horas_estimadas || 1
-      const herramientasFinal = herramientas || rel.herramientas
-      const materialesFinal   = materiales_notas || rel.materiales_notas
-      const notasAdicFinal    = notas_adicionales || rel.notas_adicionales
-
-      const notasPresupuesto = [
-        descripcionFinal ? `Relevamiento: ${descripcionFinal}` : null,
-        herramientasFinal ? `Herramientas necesarias: ${herramientasFinal}` : null,
-        materialesFinal ? `Materiales: ${materialesFinal}` : null,
-        notasAdicFinal ? `Notas adicionales: ${notasAdicFinal}` : null,
-      ].filter(Boolean).join('\n')
 
       const [[{ maxNum }]] = await pool.query('SELECT COALESCE(MAX(numero), 480) as maxNum FROM presupuestos')
       const numero = maxNum + 1
 
-      const presupuestoParams = [
-        numero,
-        ctx.cliente_nombre,
-        ctx.telefono || '',
-        `${ctx.propiedad_nombre} — ${ctx.direccion}`,
-        JSON.stringify([{ descripcion: tipoTrabajoNombre || 'Mano de obra', cantidad: horasFinal, precio_unitario: 0 }]),
-        notasPresupuesto || null,
-      ]
-      console.log('[relevamiento->presupuesto] paso 2: params del INSERT presupuestos =', presupuestoParams, '(', presupuestoParams.length, 'valores )')
-
+      // OJO: 'notas' queda vacío a propósito — es un campo libre para que el
+      // admin agregue aclaraciones al CLIENTE, no un volcadero de los datos
+      // del relevamiento. Esos datos se consultan aparte (a través del
+      // relevamiento vinculado), como referencia de solo lectura al armar
+      // el presupuesto, sin mezclarse con lo que el cliente termina viendo.
       const [presRes] = await pool.execute(
         `INSERT INTO presupuestos
           (numero, fecha, cliente_nombre, cliente_telefono, cliente_domicilio,
            mano_obra, materiales, incluir_materiales,
            iva_porcentaje, solicitar_adelanto, porcentaje_adelanto,
            subtotal_mano_obra, subtotal_materiales, total, notas, estado)
-         VALUES (?, CURDATE(), ?, ?, ?, ?, '[]', 0, 0, 0, 50, 0, 0, 0, ?, 'borrador')`,
-        presupuestoParams
+         VALUES (?, CURDATE(), ?, ?, ?, ?, '[]', 0, 0, 0, 50, 0, 0, 0, NULL, 'borrador')`,
+        [
+          numero,
+          ctx.cliente_nombre,
+          ctx.telefono || '',
+          `${ctx.propiedad_nombre} — ${ctx.direccion}`,
+          JSON.stringify([{ descripcion: tipoTrabajoNombre || 'Mano de obra', cantidad: horasFinal, precio_unitario: 0 }]),
+        ]
       )
       const presupuestoId = presRes.insertId
-      console.log('[relevamiento->presupuesto] presupuesto creado, id =', presupuestoId)
-
-      const trabajoParams = [
-        ctx.propiedad_id, ctx.cliente_id,
-        tipoTrabajoId || null, subtipo_trabajo_id || rel.subtipo_trabajo_id || null,
-        rel.visita_id, rel.id, presupuestoId,
-        tipoTrabajoNombre || 'Trabajo a presupuestar',
-        descripcionFinal,
-      ]
-      console.log('[relevamiento->presupuesto] paso 3: params del INSERT trabajos_cliente =', trabajoParams, '(', trabajoParams.length, 'valores )')
 
       await pool.execute(
         `INSERT INTO trabajos_cliente
-          (propiedad_id, cliente_id, tipo_trabajo_id, subtipo_trabajo_id,
-           visita_id, relevamiento_id, presupuesto_id, titulo, descripcion, estado)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'presupuestando')`,
-        trabajoParams
+          (propiedad_id, entidad_id, cliente_id, tipo_trabajo_id, subtipo_trabajo_id,
+           visita_id, relevamiento_id, presupuesto_id, titulo, descripcion, horas_estimadas, estado)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'presupuestando')`,
+        [
+          ctx.propiedad_id, rel.entidad_id, ctx.cliente_id,
+          tipoTrabajoId || null, subtipo_trabajo_id || rel.subtipo_trabajo_id || null,
+          rel.visita_id, rel.id, presupuestoId,
+          tipoTrabajoNombre || 'Trabajo a presupuestar',
+          descripcionFinal,
+          horasFinal,
+        ]
       )
-      console.log('[relevamiento->presupuesto] trabajo creado OK')
 
       await notificarAdmins(
         'Relevamiento enviado',
@@ -259,16 +250,13 @@ export async function updateRelevamiento(req, res) {
         rel.visita_id
       )
     } catch (err) {
-      // ⚠️ DIAGNÓSTICO TEMPORAL: loguea y devuelve el detalle exacto del error
-      // para encontrar la causa. Sacar este catch (o al menos el res.status
-      // con detalle) una vez resuelto, para no exponer detalles internos.
-      console.error('[relevamiento->presupuesto] FALLÓ:', err)
-      return res.status(500).json({
-        error: 'Error al generar el presupuesto automático',
-        detalle: err.sqlMessage || err.message,
-        sql: err.sql || null,
-        code: err.code || null,
-      })
+      console.error('[relevamiento->presupuesto] Falló la generación automática:', err)
+      await notificarAdmins(
+        'Relevamiento enviado (revisar presupuesto)',
+        `El técnico ${req.user.nombre} cargó el relevamiento, pero no pudimos generar el presupuesto automáticamente. Creálo a mano para este cliente.`,
+        'visita',
+        rel.visita_id
+      )
     }
   }
 
