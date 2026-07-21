@@ -21,6 +21,7 @@ import inventarioMLRouter  from './routes/inventarioML.js'
 import clientesRouter      from './routes/clientes.js'
 import visitasRouter       from './routes/visitas.js'
 import relevamientosRouter from './routes/relevamientos.js'
+import entidadesRouter     from './routes/entidades.js'
 import trabajosRouter      from './routes/trabajos.js'
 import turnosRouter        from './routes/turnos.js'
 import configuracionRouter from './routes/configuracion.js'
@@ -86,6 +87,7 @@ app.use('/api/ml-inventario', inventarioMLRouter)
 app.use('/api/clientes',      clientesRouter)
 app.use('/api/visitas',       requireAuth, visitasRouter)
 app.use('/api/relevamientos', requireAuth, relevamientosRouter)
+app.use('/api/entidades',     entidadesRouter) // auth dentro de cada ruta, igual que catalogo
 app.use('/api/trabajos',      requireAuth, trabajosRouter)
 app.use('/api/turnos',        requireAuth, turnosRouter)
 app.use('/api/configuracion', configuracionRouter)
